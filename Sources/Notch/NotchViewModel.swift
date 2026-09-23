@@ -4,6 +4,70 @@ import Combine
 @MainActor
 final class NotchViewModel: ObservableObject {
     @Published var snapshots: [ProviderSnapshot] = []
+    /// The clipboard history's cell, after every provider's. Off until the
+    /// history is switched on in Settings, so the stack is unchanged for
+    /// anyone who never uses it.
+    @Published var showsClipboardCell = false {
+        didSet { if !showsClipboardCell { isClipboardOpen = false } }
+    }
+
+    /// Every cell in the stack. Geometry counts these; anything that needs a
+    /// provider indexes `snapshots`, whose bounds leave the clipboard cell out.
+    var cellCount: Int { snapshots.count + (showsClipboardCell ? 1 : 0) }
+
+    /// The clipboard cell's position in the stack — always the last.
+    var clipboardIndex: Int? { showsClipboardCell ? snapshots.count : nil }
+
+    /// Newest first, as the history holds them.
+    @Published var clipboardEntries: [ClipboardEntry] = []
+    /// The history panel is showing. Only ever true while the notch is open
+    /// and the cell is there: folding or switching the history off closes it.
+    @Published var isClipboardOpen = false
+    /// The entry just picked, for the moment its row says so before the
+    /// panel closes.
+    @Published var clipboardCopiedID: UUID?
+
+    /// Where the panel's rows and buttons were last laid out, for the
+    /// controller to answer clicks from. Not published: nothing is drawn
+    /// from it.
+    let clipboardTargets = ClipboardHitTargets()
+
+    var onPickClipboardEntry: ((ClipboardEntry) -> Void)?
+    var onRemoveClipboardEntry: ((UUID) -> Void)?
+    var onClearClipboard: (() -> Void)?
+
+    /// Long enough to read "Copied", short enough that the panel is out of
+    /// the way by the time a hand reaches for ⌘V.
+    static let clipboardCopiedPause: TimeInterval = 0.45
+
+    func pickClipboardEntry(_ entry: ClipboardEntry) {
+        onPickClipboardEntry?(entry)
+        clipboardCopiedID = entry.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.clipboardCopiedPause) { [weak self] in
+            MainActor.assumeIsolated {
+                // A second pick in the meantime owns the close.
+                guard let self, self.clipboardCopiedID == entry.id else { return }
+                self.isClipboardOpen = false
+                self.clipboardCopiedID = nil
+            }
+        }
+    }
+
+    /// The panel's extent along the stack and across it, which swap over
+    /// between a side edge and a horizontal one as a tooltip card's do.
+    var clipboardPanelAlong: CGFloat {
+        edge.isVertical ? NotchLayout.clipboardPanelHeight : NotchLayout.cardWidth
+    }
+
+    var clipboardPanelAcross: CGFloat {
+        edge.isVertical ? NotchLayout.cardWidth : NotchLayout.clipboardPanelHeight
+    }
+
+    /// Centred on the cell where the screen allows, slid along it where it
+    /// does not — the same rule that keeps a tooltip on screen.
+    var clipboardPanelCentreAlong: CGFloat? {
+        clipboardIndex.map { tooltipAlong(index: $0, length: clipboardPanelAlong) }
+    }
     /// Per runtime, so Ollama's relay switching off clears its own readings
     /// and nobody else's.
     private var performances: [String: [String: LocalModelPerformance]] = [:]
@@ -87,7 +151,9 @@ final class NotchViewModel: ObservableObject {
     }
 
     /// Whether the notch is open or folded away to its pill.
-    @Published var isExpanded = false
+    @Published var isExpanded = false {
+        didSet { if !isExpanded { isClipboardOpen = false } }
+    }
     /// Clicked open, so it stays open until clicked shut again. A gesture,
     /// not a setting: it lasts as long as this session of looking at it.
     @Published var isPinned = false
@@ -307,7 +373,7 @@ final class NotchViewModel: ObservableObject {
     /// notch appears not to have opened at all. So the floor is the notch plus
     /// a fillet's worth of opening at each side, and a corner's worth beyond
     /// that for the bar's own rounding to live in.
-    var endSpread: CGFloat { endSpread(cellCount: snapshots.count) }
+    var endSpread: CGFloat { endSpread(cellCount: cellCount) }
 
     func endSpread(cellCount: Int) -> CGFloat {
         guard let hardwareNotch else { return 0 }
@@ -487,7 +553,7 @@ final class NotchViewModel: ObservableObject {
     /// The straight part of the shape, flares excluded.
     var bodyLength: CGFloat {
         NotchLayout.bodyLength(
-            cellCount: snapshots.count, edge: edge, spacing: cellSpacing
+            cellCount: cellCount, edge: edge, spacing: cellSpacing
         ) + 2 * endSpread
     }
 
@@ -498,7 +564,7 @@ final class NotchViewModel: ObservableObject {
                               spacing: cellSpacing) + endSpread
     }
 
-    var cellSpacing: CGFloat { cellSpacing(cellCount: snapshots.count) }
+    var cellSpacing: CGFloat { cellSpacing(cellCount: cellCount) }
     var cellPitch: CGFloat { NotchLayout.cellAlong(for: edge) + cellSpacing }
 
     private func cellSpacing(cellCount: Int) -> CGFloat {
@@ -540,15 +606,15 @@ final class NotchViewModel: ObservableObject {
         return snapshots[hoveredIndex]
     }
 
-    var shapeLength: CGFloat { shapeLength(cellCount: snapshots.count) }
+    var shapeLength: CGFloat { shapeLength(cellCount: cellCount) }
 
-    var panelSize: CGSize { panelSize(cellCount: snapshots.count) }
+    var panelSize: CGSize { panelSize(cellCount: cellCount) }
 
     /// How stack space maps onto the panel right now.
     var placement: NotchPlacement { NotchPlacement(edge: edge, panelSize: panelSize) }
 
     /// Room at each end of the stack, for this edge.
-    var slack: CGFloat { slack(cellCount: snapshots.count) }
+    var slack: CGFloat { slack(cellCount: cellCount) }
 
     func slack(cellCount: Int) -> CGFloat {
         NotchLayout.slack(for: edge,
@@ -558,7 +624,7 @@ final class NotchViewModel: ObservableObject {
 
     /// How many sessions a tooltip may list here before it has to summarise
     /// the rest — as many as this screen has room for.
-    var sessionCap: Int { sessionCap(cellCount: snapshots.count) }
+    var sessionCap: Int { sessionCap(cellCount: cellCount) }
 
     private var hasTokenUsage: Bool {
         snapshots.contains { $0.tokenUsage != nil }
@@ -604,10 +670,12 @@ final class NotchViewModel: ObservableObject {
 
     func maxCardHeight(cellCount: Int) -> CGFloat {
         let cap = sessionCap(cellCount: cellCount)
-        return snapshots.isEmpty
+        let tallest = snapshots.isEmpty
             ? NotchLayout.maxCardHeight(sessionCap: cap, hasTokenUsage: hasTokenUsage, hasPlan: hasPlan,
                                         hasResetCredits: hasResetCredits)
             : contentCardHeight(sessionCap: cap)
+        // The history panel is one more card the panel has to hold.
+        return showsClipboardCell ? max(tallest, NotchLayout.clipboardPanelHeight) : tallest
     }
 
     /// How tall the tallest card may be before the panel runs off the screen.

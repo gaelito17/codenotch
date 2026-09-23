@@ -51,6 +51,17 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(phoneLinkPort, forKey: Keys.phoneLinkPort) }
     }
 
+    /// Off until chosen: a history of everything copied is not something to
+    /// start keeping on anyone's behalf.
+    @Published var clipboardHistoryEnabled: Bool {
+        didSet { defaults.set(clipboardHistoryEnabled, forKey: Keys.clipboardHistoryEnabled) }
+    }
+
+    /// How many copies the history keeps; one of `ClipboardHistory.limitChoices`.
+    @Published var clipboardHistoryLimit: Int {
+        didSet { defaults.set(clipboardHistoryLimit, forKey: Keys.clipboardHistoryLimit) }
+    }
+
 
     @Published var lmstudioEndpoint: String {
         didSet { defaults.set(lmstudioEndpoint, forKey: Keys.lmstudioEndpoint) }
@@ -462,6 +473,8 @@ final class Preferences: ObservableObject {
         static let ollamaEndpoint = "ollamaEndpoint"
         static let phoneLinkEnabled = "phoneLinkEnabled"
         static let phoneLinkPort = "phoneLinkPort"
+        static let clipboardHistoryEnabled = "clipboardHistoryEnabled"
+        static let clipboardHistoryLimit = "clipboardHistoryLimit"
 
         static let lmstudioEndpoint = "lmstudioEndpoint"
         static let introducedOllama = "introducedOllama"
@@ -731,6 +744,9 @@ final class Preferences: ObservableObject {
         // says where it listens, and 1234 is what it ships with.
         self.phoneLinkEnabled = defaults.object(forKey: Keys.phoneLinkEnabled) as? Bool ?? false
         self.phoneLinkPort = defaults.object(forKey: Keys.phoneLinkPort) as? Int ?? 8788
+        self.clipboardHistoryEnabled = defaults.object(forKey: Keys.clipboardHistoryEnabled) as? Bool ?? false
+        self.clipboardHistoryLimit = (defaults.object(forKey: Keys.clipboardHistoryLimit) as? Int)
+            .flatMap { ClipboardHistory.limitChoices.contains($0) ? $0 : nil } ?? ClipboardHistory.defaultLimit
 
         self.lmstudioEndpoint = (try? LMStudioEndpoint.parse(
             defaults.string(forKey: Keys.lmstudioEndpoint)

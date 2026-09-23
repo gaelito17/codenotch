@@ -158,7 +158,7 @@ struct TooltipSilhouette: Shape {
 
 /// The card chrome every tooltip shares: fixed width, the frame's padding and
 /// corner, and the tail welded on so there is no seam between them.
-private struct TooltipShell<Content: View>: View {
+struct TooltipShell<Content: View>: View {
     /// Given explicitly rather than left to the contents.
     ///
     /// Sized by its contents, the card's height changes the instant they do —

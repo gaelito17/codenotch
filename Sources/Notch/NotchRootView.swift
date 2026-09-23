@@ -79,7 +79,31 @@ struct NotchRootView: View {
                             .animation(motion(orbMotion), value: model.isExpanded)
                 }
 
-                if let resetEvent = model.activeResetAlert,
+                if model.isClipboardOpen, model.isExpanded, let along = model.clipboardPanelCentreAlong,
+                   let index = model.clipboardIndex {
+                    // Takes the place of any tooltip: it was asked for, and a
+                    // card for whichever ring the pointer crosses on its way
+                    // to it would cover it.
+                    ClipboardPanel(
+                        entries: model.clipboardEntries,
+                        direction: model.edge.tooltipDirection,
+                        tailOffset: model.slack + model.ringCenter(index: index) * model.sizeScale - along,
+                        now: model.now,
+                        copiedID: model.clipboardCopiedID,
+                        targets: model.clipboardTargets,
+                        onPick: { model.pickClipboardEntry($0) },
+                        onRemove: { model.onRemoveClipboardEntry?($0) },
+                        onClear: { model.onClearClipboard?() }
+                    )
+                    .position(place.point(
+                        along: along,
+                        across: model.tooltipInset + (NotchLayout.tailLength + model.clipboardPanelAcross) / 2
+                    ))
+                    .transition(.opacity.combined(with: .offset(
+                        x: model.edge.outward.x * Design.px(24),
+                        y: model.edge.outward.y * Design.px(24)
+                    )))
+                } else if let resetEvent = model.activeResetAlert,
                    model.isExpanded,
                    model.hoveredIndex == nil {
                     let index = model.resetAlertIndex(for: resetEvent) ?? 0
@@ -126,8 +150,12 @@ struct NotchRootView: View {
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
+            // The window's own top-left space, which the controller hit-tests
+            // the clipboard history's rows in.
+            .coordinateSpace(.named(ClipboardHitTargets.coordinateSpace))
             // Swapping cards is a movement like any other here.
             .animation(motion(NotchMotion.glide), value: model.hoveredIndex)
+            .animation(motion(NotchMotion.glide), value: model.isClipboardOpen)
         }
         .animation(motion(NotchMotion.unfold), value: model.isExpanded)
         .tint(model.accentColor.color)
@@ -149,7 +177,7 @@ struct NotchRootView: View {
     /// than into it.
     private var orbMotion: Animation {
         model.isExpanded
-            ? NotchMotion.stagger(index: model.snapshots.count)
+            ? NotchMotion.stagger(index: model.cellCount)
             : NotchMotion.merge
     }
 
@@ -308,47 +336,60 @@ struct NotchRootView: View {
     @ViewBuilder
     private var cells: some View {
         let stack = ForEach(Array(model.snapshots.enumerated()), id: \.element.id) { index, snapshot in
-            ProviderCell(
+            placed(ProviderCell(
                 snapshot: snapshot,
                 activity: model.activity(for: snapshot),
                 isRefreshing: model.isRefreshing(snapshot),
                 weeklyRing: model.weeklyRing
-            )
-                // Pinned to what the cell claims along the stack, or the drawn
-                // rings stop lining up with the centres `ringCenter` hands to
-                // the hover bands and the tooltip tails. Across a horizontal
-                // edge that is the ring alone — the label sits below it, in the
-                // notch's depth, and claims nothing here.
-                .frame(width: model.edge.isVertical ? nil : NotchLayout.cellAlong(for: model.edge))
-                .opacity(model.isExpanded ? 1 : 0)
-                // A short slide toward the edge, no scaling: the clip is
-                // already doing the concealing, and scaling on top of it
-                // reads as two effects fighting.
-                .offset(
-                    x: model.isExpanded ? 0 : model.edge.outward.x * Design.px(28),
-                    y: model.isExpanded ? 0 : model.edge.outward.y * Design.px(28)
-                )
-                .animation(motion(NotchMotion.stagger(index: index)), value: model.isExpanded)
-                .transition(.opacity.combined(with: .offset(
-                    x: model.edge.outward.x * Design.px(28),
-                    y: model.edge.outward.y * Design.px(28)
-                )).animation(motion(NotchMotion.unfold)))
+            ), index: index)
         }
 
         Group {
             if model.edge.isVertical {
-                VStack(spacing: model.cellSpacing) { stack }
+                VStack(spacing: model.cellSpacing) { stack; clipboardCell }
                     .padding(.top, leadIn)
                     // The contents keep the expanded layout while folding, so
                     // the stack does not reflow on its way out; the shape clips it.
                     .frame(width: NotchLayout.bodyDepth(for: model.edge))
             } else {
-                HStack(spacing: model.cellSpacing) { stack }
+                HStack(spacing: model.cellSpacing) { stack; clipboardCell }
                     .padding(.leading, leadIn)
                     .frame(height: NotchLayout.bodyDepth(for: model.edge))
             }
         }
         .allowsHitTesting(model.isExpanded)
+    }
+
+    @ViewBuilder private var clipboardCell: some View {
+        if let index = model.clipboardIndex {
+            placed(ClipboardCell(isHovered: model.hoveredIndex == index,
+                                 isOpen: model.isClipboardOpen,
+                                 count: model.clipboardEntries.count), index: index)
+        }
+    }
+
+    /// What every cell in the stack shares, provider or not.
+    private func placed(_ cell: some View, index: Int) -> some View {
+        cell
+            // Pinned to what the cell claims along the stack, or the drawn
+            // rings stop lining up with the centres `ringCenter` hands to
+            // the hover bands and the tooltip tails. Across a horizontal
+            // edge that is the ring alone — the label sits below it, in the
+            // notch's depth, and claims nothing here.
+            .frame(width: model.edge.isVertical ? nil : NotchLayout.cellAlong(for: model.edge))
+            .opacity(model.isExpanded ? 1 : 0)
+            // A short slide toward the edge, no scaling: the clip is
+            // already doing the concealing, and scaling on top of it
+            // reads as two effects fighting.
+            .offset(
+                x: model.isExpanded ? 0 : model.edge.outward.x * Design.px(28),
+                y: model.isExpanded ? 0 : model.edge.outward.y * Design.px(28)
+            )
+            .animation(motion(NotchMotion.stagger(index: index)), value: model.isExpanded)
+            .transition(.opacity.combined(with: .offset(
+                x: model.edge.outward.x * Design.px(28),
+                y: model.edge.outward.y * Design.px(28)
+            )).animation(motion(NotchMotion.unfold)))
     }
 
     /// The corner of the shape's own frame where the stack starts and the

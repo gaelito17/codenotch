@@ -20,8 +20,14 @@ final class NotchPanel: NSPanel {
     var onDrag: ((CGFloat, CGFloat) -> Void)?
     /// The ⌥-drag ended. Where to persist the offset the drags above moved to.
     var onDragEnd: (() -> Void)?
+    /// Offered every left click before any view sees it; true means it was
+    /// handled and goes no further. For the clipboard history's rows: a
+    /// SwiftUI tap in this never-key window could not be shown to fire from a
+    /// real click event, and answering here, from laid-out frames, can.
+    var onClickFirst: ((CGPoint) -> Bool)?
 
     override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown, onClickFirst?(event.locationInWindow) == true { return }
         guard event.type == .rightMouseDown,
               let menu = contextMenuProvider?(),
               let view = contentView,
