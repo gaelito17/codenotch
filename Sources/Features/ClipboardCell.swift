@@ -8,6 +8,9 @@ import SwiftUI
 struct ClipboardCell: View {
     var isHovered: Bool = false
     var isOpen: Bool = false
+    /// How many copies the history holds, where a provider cell shows its
+    /// reading. Quieter than a reading: it is a count, not a warning.
+    var count: Int = 0
 
     var body: some View {
         VStack(spacing: NotchLayout.ringLabelGap) {
@@ -22,13 +25,19 @@ struct ClipboardCell: View {
             .frame(width: NotchLayout.ringDiameter, height: NotchLayout.ringDiameter)
             .animation(.easeOut(duration: 0.15), value: isHovered || isOpen)
 
-            // Holds the label line a provider cell has, so the ring lines up
-            // with the centres `ringCenter` hands out.
-            Color.clear.frame(height: NotchLayout.percentLineHeight)
+            // Always the label line's height, count or not, so the ring lines
+            // up with the centres `ringCenter` hands out.
+            Text(count > 0 ? "\(count)" : " ")
+                .font(Typography.percent)
+                .foregroundStyle(Palette.textSecondary)
+                .lineLimit(1)
+                .frame(height: NotchLayout.percentLineHeight)
+                .contentTransition(.numericText())
         }
         .frame(height: NotchLayout.cellExtent)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(L10n.t("Clipboard history"))
+        .accessibilityValue(L10n.t("\(count) items"))
         .accessibilityAddTraits(.isButton)
     }
 }

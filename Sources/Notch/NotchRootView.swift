@@ -79,7 +79,31 @@ struct NotchRootView: View {
                             .animation(motion(orbMotion), value: model.isExpanded)
                 }
 
-                if let resetEvent = model.activeResetAlert,
+                if model.isClipboardOpen, model.isExpanded, let along = model.clipboardPanelCentreAlong,
+                   let index = model.clipboardIndex {
+                    // Takes the place of any tooltip: it was asked for, and a
+                    // card for whichever ring the pointer crosses on its way
+                    // to it would cover it.
+                    ClipboardPanel(
+                        entries: model.clipboardEntries,
+                        direction: model.edge.tooltipDirection,
+                        tailOffset: model.slack + model.ringCenter(index: index) * model.sizeScale - along,
+                        now: model.now,
+                        copiedID: model.clipboardCopiedID,
+                        targets: model.clipboardTargets,
+                        onPick: { model.pickClipboardEntry($0) },
+                        onRemove: { model.onRemoveClipboardEntry?($0) },
+                        onClear: { model.onClearClipboard?() }
+                    )
+                    .position(place.point(
+                        along: along,
+                        across: model.tooltipInset + (NotchLayout.tailLength + model.clipboardPanelAcross) / 2
+                    ))
+                    .transition(.opacity.combined(with: .offset(
+                        x: model.edge.outward.x * Design.px(24),
+                        y: model.edge.outward.y * Design.px(24)
+                    )))
+                } else if let resetEvent = model.activeResetAlert,
                    model.isExpanded,
                    model.hoveredIndex == nil {
                     let index = model.resetAlertIndex(for: resetEvent) ?? 0
@@ -126,8 +150,12 @@ struct NotchRootView: View {
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
+            // The window's own top-left space, which the controller hit-tests
+            // the clipboard history's rows in.
+            .coordinateSpace(.named(ClipboardHitTargets.coordinateSpace))
             // Swapping cards is a movement like any other here.
             .animation(motion(NotchMotion.glide), value: model.hoveredIndex)
+            .animation(motion(NotchMotion.glide), value: model.isClipboardOpen)
         }
         .animation(motion(NotchMotion.unfold), value: model.isExpanded)
         .tint(model.accentColor.color)
@@ -334,7 +362,9 @@ struct NotchRootView: View {
 
     @ViewBuilder private var clipboardCell: some View {
         if let index = model.clipboardIndex {
-            placed(ClipboardCell(isHovered: model.hoveredIndex == index), index: index)
+            placed(ClipboardCell(isHovered: model.hoveredIndex == index,
+                                 isOpen: model.isClipboardOpen,
+                                 count: model.clipboardEntries.count), index: index)
         }
     }
 

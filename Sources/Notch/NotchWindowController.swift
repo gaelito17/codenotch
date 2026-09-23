@@ -26,8 +26,6 @@ final class NotchWindowController {
     var onRefreshProvider: ((String) async -> Void)?
     /// Open the settings window, asked for by clicking the handle.
     var onOpenSettings: (() -> Void)?
-    /// Open or close the clipboard history, asked for by clicking its cell.
-    var onToggleClipboard: (() -> Void)?
     /// An ⌥-drag on the pill settled at a new `model.alongOffset`. The
     /// controller only holds the live value; persisting it per edge is
     /// Preferences' job, the same division `apply(edge:)` already keeps.
@@ -219,6 +217,14 @@ final class NotchWindowController {
             }
             .store(in: &cancellables)
 
+        // Deferred: the rect is read from `isClipboardOpen`, which in willSet
+        // still holds the value being replaced.
+        model.$isClipboardOpen
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.updateInteractiveRects() }
+            .store(in: &cancellables)
+
         // A model can gain speed rows without changing the cell count. Read
         // after Published's willSet so sizing sees the new card contents too.
         model.$snapshots
@@ -325,6 +331,7 @@ final class NotchWindowController {
             let hosting = NotchHostingView(rootView: NotchRootView(model: model))
             panel.contextMenuProvider = { [weak self] in self?.contextMenu() }
             panel.onClick = { [weak self] point in self?.handleClick(at: point) }
+            panel.onClickFirst = { [weak self] point in self?.handleClipboardClick(at: point) ?? false }
             panel.onDragStart = { [weak self] in self?.beginOptionDrag() }
             panel.onDrag = { [weak self] dx, dy in self?.dragged(dx: dx, dy: dy) }
             panel.onDragEnd = { [weak self] in
@@ -489,7 +496,8 @@ final class NotchWindowController {
     /// The card, its tail, and the gap between the tail and the notch — so
     /// sliding the pointer off the notch and onto the card never leaves it.
     private func tooltipRect(index: Int) -> CGRect? {
-        guard model.snapshots.indices.contains(index) else { return nil }
+        // No tooltip is drawn over an open history, so none takes the mouse.
+        guard !model.isClipboardOpen, model.snapshots.indices.contains(index) else { return nil }
         let snapshot = model.snapshots[index]
         let cardHeight = NotchLayout.cardHeight(
             windowCount: snapshot.windows.count,
@@ -524,6 +532,19 @@ final class NotchWindowController {
         )
     }
 
+    /// The history panel with its tail and the gap to the notch, on the
+    /// tooltip's terms.
+    private var clipboardRect: CGRect? {
+        guard model.isExpanded, model.isClipboardOpen,
+              let centre = model.clipboardPanelCentreAlong else { return nil }
+        return placement.rect(
+            along: centre - model.clipboardPanelAlong / 2,
+            across: model.notchDrawnDepth,
+            length: model.clipboardPanelAlong,
+            depth: NotchLayout.tailGap + NotchLayout.tailLength + model.clipboardPanelAcross
+        )
+    }
+
     private func resetCardRect(event: UsageResetEvent) -> CGRect? {
         let index = model.resetAlertIndex(for: event) ?? 0
         let cardAcross = model.edge.isVertical ? NotchLayout.cardWidth : UsageResetCard.cardHeight
@@ -544,6 +565,9 @@ final class NotchWindowController {
         }
         if model.isExpanded, let index = model.hoveredIndex, let card = tooltipRect(index: index) {
             rects.append(card)
+        }
+        if let clipboardRect {
+            rects.append(clipboardRect)
         }
         hostingView?.interactiveRects = rects
         if let panel {
@@ -621,6 +645,18 @@ final class NotchWindowController {
         }) {
             mouseMonitors.append(local)
         }
+
+        // A click anywhere outside Codenotch puts the history away. Global
+        // only: a click on the notch itself arrives through `handleClick`,
+        // which decides for itself.
+        if let outside = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.model.isClipboardOpen else { return }
+                self.model.isClipboardOpen = false
+            }
+        }) {
+            mouseMonitors.append(outside)
+        }
     }
 
     private func localCursor(in frame: CGRect) -> CGPoint {
@@ -636,6 +672,7 @@ final class NotchWindowController {
         let overTooltip = model.hoveredIndex
             .flatMap(tooltipRect(index:))
             .map { model.isExpanded && $0.contains(local) } ?? false
+            || clipboardRect?.contains(local) == true
         // The fold setting gates this check as surely as the one in
         // handleActiveSpaceOrAppChange: left ungated, the hover fold out-votes
         // "Always show" under a full-screen app while the other path keeps
@@ -796,6 +833,16 @@ final class NotchWindowController {
             updateInteractiveRects()
             return
         }
+        // The history's rows take their own taps. Anywhere else on the notch
+        // puts it away — and does only that, rather than also refetching or
+        // pinning, since the click was aimed at getting rid of the panel.
+        let clickedCell = model.isExpanded && notchRect.contains(local)
+            ? cellIndex(along: placement.along(of: local)) : nil
+        if model.isClipboardOpen {
+            if clipboardRect?.contains(local) == true { return }
+            model.isClipboardOpen = false
+            return
+        }
         // Clicks on the tooltip card belong to whatever is drawn there — the
         // session rows take their own taps — and must not fall through to the
         // cell refetch or the pin toggle underneath.
@@ -815,9 +862,8 @@ final class NotchWindowController {
             setExpanded(true)
             return
         }
-        let clickedCell = notchRect.contains(local) ? cellIndex(along: placement.along(of: local)) : nil
         if let clickedCell, clickedCell == model.clipboardIndex {
-            onToggleClipboard?()
+            withAnimation(NotchMotion.glide) { model.isClipboardOpen = true }
             return
         }
         if let index = clickedCell, model.snapshots.indices.contains(index) {
@@ -828,6 +874,29 @@ final class NotchWindowController {
             return
         }
         togglePinned()
+    }
+
+    /// A click inside the open history, answered from where its rows were
+    /// last laid out. Every click inside the panel is taken, even one on
+    /// padding, so nothing behind it — a cell, the pin — sees it either.
+    func handleClipboardClick(at locationInWindow: CGPoint) -> Bool {
+        guard let panel, let clipboardRect else { return false }
+        let local = CGPoint(x: locationInWindow.x, y: panel.frame.height - locationInWindow.y)
+        guard clipboardRect.contains(local) else { return false }
+
+        switch model.clipboardTargets.target(at: local) {
+        case .pick(let id):
+            if let entry = model.clipboardEntries.first(where: { $0.id == id }), !entry.isMissingFiles {
+                model.pickClipboardEntry(entry)
+            }
+        case .remove(let id):
+            model.onRemoveClipboardEntry?(id)
+        case .clear:
+            model.onClearClipboard?()
+        case nil:
+            break
+        }
+        return true
     }
 
     /// Move the notch to another screen edge.

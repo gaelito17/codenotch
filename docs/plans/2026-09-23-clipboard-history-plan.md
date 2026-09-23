@@ -1,7 +1,7 @@
 # Clipboard history plan
 
 Prepared 2026-09-23 against `aae2c1f` (Codenotch 1.17.0).
-Status: phases 1–2 implemented on `clipboard-history`.
+Status: phases 1–3 implemented on `clipboard-history`.
 
 ## What the user chose
 
@@ -137,6 +137,18 @@ enum: geometry counts `cellCount` (providers plus one), and the clipboard cell
 is `clipboardIndex == snapshots.count`. Every existing
 `snapshots.indices.contains(index)` guard already excludes it, so nothing that
 reads a provider can be handed the clipboard cell by mistake.
+
+### Clicks in the panel
+
+The notch window never becomes key. In tests, a SwiftUI tap gesture or
+`Button` inside it never fired from a real `NSEvent` sent through the window,
+even with mouse events enabled. So the panel does not rely on SwiftUI to take
+clicks: it records each row's, remove button's and Clear's frame in the
+window's own coordinates (`ClipboardHitTargets`), `NotchPanel.onClickFirst`
+offers every left click to the controller before any view sees it, and the
+controller answers from those frames — clipped to the list's visible bounds,
+remove before pick. VoiceOver acts through accessibility actions instead.
+`ClipboardPanelTests.testARowTakesARealClick` drives this with real events.
 
 ## Phases
 

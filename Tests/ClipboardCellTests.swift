@@ -54,7 +54,10 @@ final class ClipboardCellTests: XCTestCase {
             let with = model(edge: edge)
             XCTAssertEqual(with.shapeLength, without.shapeLength(cellCount: 4), accuracy: 0.001, "\(edge)")
             XCTAssertGreaterThan(with.shapeLength, without.shapeLength, "\(edge)")
-            XCTAssertEqual(with.panelSize, without.panelSize(cellCount: 4), "\(edge)")
+            // At least a fourth cell's worth, and more where the history
+            // panel is taller than any tooltip.
+            XCTAssertGreaterThanOrEqual(with.panelSize.width, without.panelSize(cellCount: 4).width, "\(edge)")
+            XCTAssertGreaterThanOrEqual(with.panelSize.height, without.panelSize(cellCount: 4).height, "\(edge)")
         }
     }
 
@@ -141,9 +144,7 @@ final class ClipboardCellTests: XCTestCase {
         // AppKit rounds the frame to whole points.
         XCTAssertEqual(frame.height, m.panelSize.height, accuracy: 1, "the panel was not resized for the new cell")
 
-        var toggles = 0
         var refetched: [String] = []
-        controller.onToggleClipboard = { toggles += 1 }
         controller.onRefreshProvider = { refetched.append($0) }
 
         let place = NotchPlacement(edge: m.edge, panelSize: frame.size)
@@ -155,14 +156,19 @@ final class ClipboardCellTests: XCTestCase {
         }
 
         click(cell: m.clipboardIndex!)
-        XCTAssertEqual(toggles, 1)
+        XCTAssertTrue(m.isClipboardOpen)
         XCTAssertFalse(m.isPinned, "a click on the clipboard cell must not also pin the notch")
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         XCTAssertTrue(refetched.isEmpty)
 
+        // With the history open, a click on a ring only puts it away.
         click(cell: 0)
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-        XCTAssertEqual(toggles, 1)
+        XCTAssertFalse(m.isClipboardOpen)
+        XCTAssertTrue(refetched.isEmpty)
+
+        click(cell: 0)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
         XCTAssertEqual(refetched.count, 1, "a provider cell still refetches")
     }
 }

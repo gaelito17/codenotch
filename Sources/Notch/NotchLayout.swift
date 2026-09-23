@@ -144,6 +144,13 @@ enum NotchLayout {
     static let cardWidth     = Design.px(600)
     static let cardCorner    = Design.px(49.5)
     static let cardPadding   = Design.px(32)
+
+    // The clipboard history panel. Not in the design frame: it borrows the
+    // card's width, corner and padding so it reads as one of the family, and
+    // is as tall as about six rows of copies.
+    static let clipboardPanelHeight = Design.px(960)
+    static let clipboardRowIcon     = Design.px(76)
+    static let clipboardRowPadding  = Design.px(14)
     static let tailLength    = Design.px(75)
     static let tailHeight    = Design.px(87)
     static let tailGap       = Design.px(28)    // tail tip -> notch body edge

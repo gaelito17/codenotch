@@ -7,7 +7,9 @@ final class NotchViewModel: ObservableObject {
     /// The clipboard history's cell, after every provider's. Off until the
     /// history is switched on in Settings, so the stack is unchanged for
     /// anyone who never uses it.
-    @Published var showsClipboardCell = false
+    @Published var showsClipboardCell = false {
+        didSet { if !showsClipboardCell { isClipboardOpen = false } }
+    }
 
     /// Every cell in the stack. Geometry counts these; anything that needs a
     /// provider indexes `snapshots`, whose bounds leave the clipboard cell out.
@@ -15,6 +17,57 @@ final class NotchViewModel: ObservableObject {
 
     /// The clipboard cell's position in the stack — always the last.
     var clipboardIndex: Int? { showsClipboardCell ? snapshots.count : nil }
+
+    /// Newest first, as the history holds them.
+    @Published var clipboardEntries: [ClipboardEntry] = []
+    /// The history panel is showing. Only ever true while the notch is open
+    /// and the cell is there: folding or switching the history off closes it.
+    @Published var isClipboardOpen = false
+    /// The entry just picked, for the moment its row says so before the
+    /// panel closes.
+    @Published var clipboardCopiedID: UUID?
+
+    /// Where the panel's rows and buttons were last laid out, for the
+    /// controller to answer clicks from. Not published: nothing is drawn
+    /// from it.
+    let clipboardTargets = ClipboardHitTargets()
+
+    var onPickClipboardEntry: ((ClipboardEntry) -> Void)?
+    var onRemoveClipboardEntry: ((UUID) -> Void)?
+    var onClearClipboard: (() -> Void)?
+
+    /// Long enough to read "Copied", short enough that the panel is out of
+    /// the way by the time a hand reaches for ⌘V.
+    static let clipboardCopiedPause: TimeInterval = 0.45
+
+    func pickClipboardEntry(_ entry: ClipboardEntry) {
+        onPickClipboardEntry?(entry)
+        clipboardCopiedID = entry.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.clipboardCopiedPause) { [weak self] in
+            MainActor.assumeIsolated {
+                // A second pick in the meantime owns the close.
+                guard let self, self.clipboardCopiedID == entry.id else { return }
+                self.isClipboardOpen = false
+                self.clipboardCopiedID = nil
+            }
+        }
+    }
+
+    /// The panel's extent along the stack and across it, which swap over
+    /// between a side edge and a horizontal one as a tooltip card's do.
+    var clipboardPanelAlong: CGFloat {
+        edge.isVertical ? NotchLayout.clipboardPanelHeight : NotchLayout.cardWidth
+    }
+
+    var clipboardPanelAcross: CGFloat {
+        edge.isVertical ? NotchLayout.cardWidth : NotchLayout.clipboardPanelHeight
+    }
+
+    /// Centred on the cell where the screen allows, slid along it where it
+    /// does not — the same rule that keeps a tooltip on screen.
+    var clipboardPanelCentreAlong: CGFloat? {
+        clipboardIndex.map { tooltipAlong(index: $0, length: clipboardPanelAlong) }
+    }
     /// Per runtime, so Ollama's relay switching off clears its own readings
     /// and nobody else's.
     private var performances: [String: [String: LocalModelPerformance]] = [:]
@@ -98,7 +151,9 @@ final class NotchViewModel: ObservableObject {
     }
 
     /// Whether the notch is open or folded away to its pill.
-    @Published var isExpanded = false
+    @Published var isExpanded = false {
+        didSet { if !isExpanded { isClipboardOpen = false } }
+    }
     /// Clicked open, so it stays open until clicked shut again. A gesture,
     /// not a setting: it lasts as long as this session of looking at it.
     @Published var isPinned = false
@@ -615,10 +670,12 @@ final class NotchViewModel: ObservableObject {
 
     func maxCardHeight(cellCount: Int) -> CGFloat {
         let cap = sessionCap(cellCount: cellCount)
-        return snapshots.isEmpty
+        let tallest = snapshots.isEmpty
             ? NotchLayout.maxCardHeight(sessionCap: cap, hasTokenUsage: hasTokenUsage, hasPlan: hasPlan,
                                         hasResetCredits: hasResetCredits)
             : contentCardHeight(sessionCap: cap)
+        // The history panel is one more card the panel has to hold.
+        return showsClipboardCell ? max(tallest, NotchLayout.clipboardPanelHeight) : tallest
     }
 
     /// How tall the tallest card may be before the panel runs off the screen.
