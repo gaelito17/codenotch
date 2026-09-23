@@ -1,8 +1,8 @@
 # Clipboard history plan
 
 Prepared 2026-09-23 against `aae2c1f` (Codenotch 1.17.0).
-Status: phases 1–4 implemented on `clipboard-history`. The pasteboard
-permission prompt is still to be checked by hand on a real Mac (phase 5).
+Status: implemented on `clipboard-history`, phases 1–5. Verification is
+recorded at the end.
 
 ## What the user chose
 
@@ -191,3 +191,30 @@ remove before pick. VoiceOver acts through accessibility actions instead.
   and switching off deletes it.
 - **Permission alert** — an unexpected system prompt on first capture if
   enabling the feature does not set the expectation first.
+
+## Verification (2026-09-23)
+
+- `make test`: the whole suite passes, 4 skipped as on `main`. The clipboard
+  adds tests for capture and its filters, the history's rules, the store's
+  round trip and privacy, the service (off by default, persistence, copies
+  made while loading, switching off deletes), the preference, the fleet,
+  the cell's geometry on every edge, the panel fitting its window on every
+  edge, size and cell count, and real `NSEvent` clicks picking, removing and
+  clearing through the notch window.
+- Live-window captures on all four edges at all three sizes: the panel opens
+  away from the bezel with its tail on the cell, and every kind of row
+  draws. (`ImageRenderer` does not draw a scroll view's contents, so row
+  rendering is checked in a live window.)
+- By hand on the author's Mac: switching the history on, copying text,
+  picking it back from the panel and pasting it works. Rich text, images and
+  files were covered by tests, not by hand.
+- Not yet confirmed by hand: how often macOS's pasteboard alert appears under
+  its default *Ask* setting.
+
+### Changed during review
+
+- The saved history is loaded off the main thread, since it can be large
+  and loads at every launch. Capture starts at once; copies made while it
+  loads go on top of it, and nothing is saved until it is in, because a
+  save removes every entry it does not list.
+

@@ -833,9 +833,10 @@ final class NotchWindowController {
             updateInteractiveRects()
             return
         }
-        // The history's rows take their own taps. Anywhere else on the notch
-        // puts it away — and does only that, rather than also refetching or
-        // pinning, since the click was aimed at getting rid of the panel.
+        // Clicks inside the history were answered before this, by
+        // `handleClipboardClick`. Anywhere else on the notch puts it away —
+        // and does only that, rather than also refetching or pinning, since
+        // the click was aimed at getting rid of the panel.
         let clickedCell = model.isExpanded && notchRect.contains(local)
             ? cellIndex(along: placement.along(of: local)) : nil
         if model.isClipboardOpen {

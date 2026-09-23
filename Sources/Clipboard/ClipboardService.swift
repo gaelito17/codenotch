@@ -30,6 +30,14 @@ final class ClipboardService: ObservableObject {
     /// folder that switching off has just removed.
     private let disk = DispatchQueue(label: "com.vinz.codenotch.clipboard-store", qos: .utility)
     private var pendingSave: DispatchWorkItem?
+    /// Bumped on every switch, so a load that finishes after the history was
+    /// switched off — or off and on again — is dropped rather than applied.
+    private var generation = 0
+    private var limit = ClipboardHistory.defaultLimit
+    /// Until the saved history is in, `history` holds only what was copied
+    /// since, and must not be saved: a save deletes every entry it does not
+    /// list, which would be all of the ones still loading.
+    private var isLoaded = false
 
     /// Coalesces a burst of copies into one write.
     static let saveDelay: TimeInterval = 0.4
@@ -55,12 +63,33 @@ final class ClipboardService: ObservableObject {
     func setEnabled(_ enabled: Bool, limit: Int) {
         guard enabled != isEnabled else { return setLimit(limit) }
         isEnabled = enabled
+        generation += 1
+        self.limit = limit
         if enabled {
-            history = store.load()
-            history.limit = limit
-            publish()
+            // Loaded off the main thread: a history of screenshots can be a
+            // couple of hundred megabytes, and this runs at every launch.
+            // Capture starts at once, and anything copied meanwhile goes on
+            // top of what was loaded.
+            isLoaded = false
+            history = ClipboardHistory(limit: limit)
             monitor.start()
+            let generation = generation
+            disk.async { [store] in
+                let loaded = store.load()
+                DispatchQueue.main.async { [weak self] in
+                    MainActor.assumeIsolated {
+                        guard let self, self.isEnabled, self.generation == generation else { return }
+                        let copiedMeanwhile = self.history.entries
+                        self.history = loaded
+                        self.history.limit = self.limit
+                        for entry in copiedMeanwhile.reversed() { self.history.record(entry) }
+                        self.isLoaded = true
+                        copiedMeanwhile.isEmpty ? self.publish() : self.changed()
+                    }
+                }
+            }
         } else {
+            isLoaded = false
             monitor.stop()
             pendingSave?.cancel()
             pendingSave = nil
@@ -74,6 +103,7 @@ final class ClipboardService: ObservableObject {
     }
 
     func setLimit(_ limit: Int) {
+        self.limit = limit
         guard history.limit != limit else { return }
         history.limit = limit
         changed()
@@ -113,11 +143,13 @@ final class ClipboardService: ObservableObject {
     /// Where the user changes that answer.
     static let privacySettingsURL = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Pasteboard")!
 
-    /// Waits for pending writes; tests only.
+    /// Waits for pending loads and writes; tests only.
     func flushForTesting() {
         pendingSave?.perform()
         pendingSave = nil
         disk.sync {}
+        // A finished load hands its result back on the main queue.
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
     }
 
     // MARK: Private
@@ -138,7 +170,7 @@ final class ClipboardService: ObservableObject {
     }
 
     private func scheduleSave() {
-        guard isEnabled else { return }
+        guard isEnabled, isLoaded else { return }
         pendingSave?.cancel()
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {

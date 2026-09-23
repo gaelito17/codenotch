@@ -232,6 +232,29 @@ stays crossed, and again only after the window has genuinely rolled over.
 Each provider can be muted from its own row in Settings, and macOS permission
 is asked on the first real alert rather than at launch.
 
+## Clipboard history
+
+Off until you switch it on in **Settings › Clipboard**. Then a clipboard cell
+sits at the end of the notch, after every account, with the number of copies
+under it. Click it and the history opens beside the notch, away from the
+screen edge like a tooltip: text, rich text, images and files, each with the
+app it came from and how long ago. Click a copy to put it back on the
+clipboard — every format it was copied in — and ⌘V pastes it. The notch never
+takes focus, so the app you were in still has it.
+
+The history stays on this Mac, in
+`~/Library/Application Support/Codenotch/Clipboard/` (readable only by you),
+and is kept across restarts: 25 to 200 copies, 250 MB at most. Copies a
+password manager marks as private — the `org.nspasteboard` concealed,
+transient and auto-generated markers — are never read, let alone kept. Files
+are kept as references, not copies. Switching the feature off stops watching
+the clipboard and deletes the folder. Nothing from it is logged or sent to a
+paired phone.
+
+macOS asks before an app reads the clipboard in the background. Settings ›
+Clipboard shows what it has been told and links to **Privacy & Security ›
+Paste from Other Apps**, where Codenotch can be allowed.
+
 ## Placement
 
 The notch lives on any of the four screen edges. Right and left keep a

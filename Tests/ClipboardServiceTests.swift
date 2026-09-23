@@ -69,6 +69,7 @@ final class ClipboardServiceTests: XCTestCase {
 
         let second = service()
         second.setEnabled(true, limit: 50)
+        second.flushForTesting()
         XCTAssertEqual(second.entries.map(\.plainText), ["two", "one"])
     }
 
@@ -105,6 +106,41 @@ final class ClipboardServiceTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "old")
         XCTAssertEqual(clipboard.entries.map(\.plainText), ["old", "new"])
         XCTAssertEqual(clipboard.entries[0].id, old.id)
+    }
+
+    func testALoadThatFinishesAfterSwitchingOffIsDropped() {
+        let first = service()
+        first.setEnabled(true, limit: 50)
+        waitForPoll()
+        copy("kept on disk")
+        waitForPoll()
+        first.flushForTesting()
+
+        let second = service()
+        second.setEnabled(true, limit: 50)
+        second.setEnabled(false, limit: 50)
+        second.flushForTesting()
+        XCTAssertTrue(second.entries.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+    }
+
+    func testCopiesMadeWhileLoadingGoOnTopAndNothingIsLost() {
+        let first = service()
+        first.setEnabled(true, limit: 50)
+        first.flushForTesting()
+        copy("from last time")
+        waitForPoll()
+        first.flushForTesting()
+
+        let second = service()
+        second.setEnabled(true, limit: 50)
+        // Before the load has come back.
+        copy("while loading")
+        RunLoop.current.run(until: Date().addingTimeInterval(ClipboardMonitor.pollInterval * 1.6))
+        second.flushForTesting()
+        XCTAssertEqual(second.entries.map(\.plainText), ["while loading", "from last time"])
+        second.flushForTesting()
+        XCTAssertEqual(store.load().entries.map(\.plainText), ["while loading", "from last time"])
     }
 
     func testRemoveClearAndLimitAreKept() {
