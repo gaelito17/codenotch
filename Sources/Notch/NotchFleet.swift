@@ -76,6 +76,9 @@ final class NotchFleet {
     var onRefreshProvider: ((String) async -> Void)?
     var onOpenSettings: (() -> Void)?
     var onFocusSession: ((pid_t) -> Void)?
+    var onPickClipboardEntry: ((ClipboardEntry) -> Void)?
+    var onRemoveClipboardEntry: ((UUID) -> Void)?
+    var onClearClipboard: (() -> Void)?
     var signInItems: [(title: String, action: () -> Void)] = []
     /// An ⌥-drag on any one panel settled at a new offset. Persisting it is
     /// Preferences' job, same division `apply(edge:)` already keeps.
@@ -244,6 +247,22 @@ final class NotchFleet {
         self.scale = scale
         for controller in controllers.values {
             controller.apply(scale: scale)
+        }
+    }
+
+    // MARK: - Clipboard
+
+    private var showsClipboard = false
+    private var clipboardEntries: [ClipboardEntry] = []
+
+    /// Every display's notch, not the menu's model: the history lives on the
+    /// notch, and the menu has no cell to count.
+    func setClipboard(shown: Bool, entries: [ClipboardEntry]) {
+        showsClipboard = shown
+        clipboardEntries = entries
+        for controller in controllers.values {
+            controller.model.showsClipboardCell = shown
+            controller.model.clipboardEntries = entries
         }
     }
 
@@ -433,6 +452,11 @@ final class NotchFleet {
         controller.onOpenSettings = onOpenSettings
         controller.model.onOpenSettings = onOpenSettings
         controller.model.onFocusSession = onFocusSession
+        controller.model.onPickClipboardEntry = onPickClipboardEntry
+        controller.model.onRemoveClipboardEntry = onRemoveClipboardEntry
+        controller.model.onClearClipboard = onClearClipboard
+        controller.model.showsClipboardCell = showsClipboard
+        controller.model.clipboardEntries = clipboardEntries
         controller.onReposition = onReposition
         controller.onMoveToEdge = onMoveToEdge
         controller.signInItems = signInItems

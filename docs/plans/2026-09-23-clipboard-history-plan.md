@@ -1,7 +1,8 @@
 # Clipboard history plan
 
 Prepared 2026-09-23 against `aae2c1f` (Codenotch 1.17.0).
-Status: phases 1–3 implemented on `clipboard-history`.
+Status: phases 1–4 implemented on `clipboard-history`. The pasteboard
+permission prompt is still to be checked by hand on a real Mac (phase 5).
 
 ## What the user chose
 
@@ -103,9 +104,11 @@ Settings.
 - `.alwaysDeny` → the cell shows a disabled state, the panel still lists
   existing history (writing to the pasteboard is not restricted), and
   Settings says why capture has stopped.
-- To verify in the first phase: whether reading `changeCount` alone triggers
-  the alert (the header implies only content access does), and how the alert
-  behaves for an ad-hoc-signed Debug build.
+- To verify by hand (phase 5): whether reading `changeCount` alone triggers
+  the alert (the header implies only content access does), whether `.ask`
+  means an alert on every copy, and how the alert behaves for an
+  ad-hoc-signed Debug build. Settings › Clipboard shows the current answer
+  and links to the pane where it is changed.
 
 ## Implementation
 

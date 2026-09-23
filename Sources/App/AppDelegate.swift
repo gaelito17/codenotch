@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var activityCoordinator: ActivityCoordinator?
     private var ollamaRelay: OllamaActivityRelay?
     private var lmstudioMetrics: LMStudioMetrics?
+    private var clipboard: ClipboardService?
     private var preferences: Preferences?
     private var settings: SettingsWindowController?
     private var whatsNew: WhatsNewWindowController?
@@ -104,6 +105,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // with its numbers, for screenshots and for eyeballing the layout.
         if ProcessInfo.processInfo.environment["CODENOTCH_DEMO"] == "1" {
             fleet.setSnapshots(Fixtures.snapshots())
+            // Sample copies rather than the real pasteboard: a screenshot of
+            // the demo must never carry whatever was last copied.
+            fleet.setClipboard(shown: true, entries: Fixtures.clipboardEntries())
         } else {
             // DeepSeek's Platform usage page is a browser-session provider:
             // login is explicit, stays in Codenotch's own WKWebView store, and
@@ -337,6 +341,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.phoneLinkServerStatus = serverStatus
             self.phoneLinkServer = server
 
+            // The history is off until chosen; the switch and the size both
+            // go straight through, and the notch follows what the service
+            // actually holds rather than the preference.
+            let clipboard = ClipboardService()
+            self.clipboard = clipboard
+            Publishers.CombineLatest(preferences.$clipboardHistoryEnabled, preferences.$clipboardHistoryLimit)
+                .receive(on: RunLoop.main)
+                .sink { [weak clipboard] enabled, limit in clipboard?.setEnabled(enabled, limit: limit) }
+                .store(in: &cancellables)
+            Publishers.CombineLatest(clipboard.$isEnabled, clipboard.$entries)
+                .receive(on: RunLoop.main)
+                .sink { [weak fleet] shown, entries in fleet?.setClipboard(shown: shown, entries: entries) }
+                .store(in: &cancellables)
+            // Set before the fleet builds its first controller, which copies
+            // these at creation — see the note above `fleet.apply(...)` below.
+            fleet.onPickClipboardEntry = { [weak clipboard] in clipboard?.pick($0) }
+            fleet.onRemoveClipboardEntry = { [weak clipboard] in clipboard?.remove($0) }
+            fleet.onClearClipboard = { [weak clipboard] in clipboard?.clear() }
+
             let settings = SettingsWindowController(
                 preferences: preferences,
                 // A closure so the sheet re-reads accounts each time it comes
@@ -369,6 +392,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.previewWeeklyLimitAlert()
                 },
                 usageStore: store, ollamaRelay: relay, lmstudioMetrics: lmstudio,
+                clipboard: clipboard,
                 phoneLinkPairing: phonePairing, phoneLinkRegistry: phoneRegistry, phoneLinkServerStatus: serverStatus
             )
             // The gear toggles; everything else that opens settings opens it.
