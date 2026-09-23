@@ -1,7 +1,7 @@
 # Clipboard history plan
 
 Prepared 2026-09-23 against `aae2c1f` (Codenotch 1.17.0).
-Status: scoped, not started.
+Status: phases 1–2 implemented on `clipboard-history`.
 
 ## What the user chose
 
@@ -121,7 +121,7 @@ Settings.
 
 | Changed | Why |
 | --- | --- |
-| `Notch/NotchViewModel.swift` | the stack becomes cells that are a provider **or** the clipboard; `isClipboardOpen` |
+| `Notch/NotchViewModel.swift` | `showsClipboardCell`, `cellCount`, `clipboardIndex`; `isClipboardOpen` |
 | `Notch/NotchLayout.swift` | cell count includes the clipboard cell; panel size and depth |
 | `Notch/NotchRootView.swift` | draws the cell and the panel |
 | `Notch/NotchWindowController.swift` | click routing, interactive rects, closing rules |
@@ -132,18 +132,19 @@ Settings.
 
 The stack today is `snapshots: [ProviderSnapshot]`, and many paths index it
 directly — `hoveredIndex`, `cellIndex(along:)`, the click-to-refetch, the reset
-alert's lookup, `sessionCap`. Rather than inserting a fake snapshot, introduce a
-small `NotchCell` enum (`.provider(ProviderSnapshot)`, `.clipboard`) for layout
-and hit-testing, and keep `snapshots` meaning providers. This refactor is the
-riskiest step and lands first, on its own, with the existing tests green.
+alert's lookup. Because the clipboard cell is always last, it needs no cell
+enum: geometry counts `cellCount` (providers plus one), and the clipboard cell
+is `clipboardIndex == snapshots.count`. Every existing
+`snapshots.indices.contains(index)` guard already excludes it, so nothing that
+reads a provider can be handed the clipboard cell by mistake.
 
 ## Phases
 
 1. **Model and capture** — entry, history, store, monitor; unit tests for the
    filter, dedup, limits, eviction, own-write suppression, persistence round
    trip. Verify the permission behaviour on this Mac.
-2. **Stack cell** — `NotchCell` refactor with no visible change, then the
-   clipboard cell at the end of the stack; check all four edges and three sizes.
+2. **Stack cell** — geometry counts `cellCount`, then the clipboard cell at
+   the end of the stack; check all four edges and three sizes.
 3. **Panel** — rows for each kind, pick, remove, clear, closing rules.
 4. **Settings, copy, demo** — Clipboard section, translations optional,
    demo fixtures.

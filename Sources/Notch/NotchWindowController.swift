@@ -26,6 +26,8 @@ final class NotchWindowController {
     var onRefreshProvider: ((String) async -> Void)?
     /// Open the settings window, asked for by clicking the handle.
     var onOpenSettings: (() -> Void)?
+    /// Open or close the clipboard history, asked for by clicking its cell.
+    var onToggleClipboard: (() -> Void)?
     /// An ⌥-drag on the pill settled at a new `model.alongOffset`. The
     /// controller only holds the live value; persisting it per edge is
     /// Preferences' job, the same division `apply(edge:)` already keeps.
@@ -225,6 +227,16 @@ final class NotchWindowController {
             .sink { [weak self] _ in self?.relocate() }
             .store(in: &cancellables)
 
+        // One cell more or fewer. Deferred like the provider list above: the
+        // slack and end extents `relocate` reads are computed from the count,
+        // and in willSet that is still the old one.
+        model.$showsClipboardCell
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.relocate() }
+            .store(in: &cancellables)
+
         // No `receive(on:)`: the appearance has to be on the window before the
         // next draw, or the frame's hexes and the glass would be resolved
         // against the appearance the panel is about to stop having.
@@ -295,7 +307,7 @@ final class NotchWindowController {
     func relocate(cellCount: Int? = nil) {
         guard let screen = currentScreen() else { return }
         model.adopt(screen: screen)
-        let size = model.panelSize(cellCount: cellCount ?? model.snapshots.count)
+        let size = model.panelSize(cellCount: cellCount ?? model.cellCount)
         let frame = NotchGeometry.panelFrame(
             for: screen, panelSize: size, edge: model.edge,
             alongOffset: model.alongOffset, slack: model.slack,
@@ -803,9 +815,12 @@ final class NotchWindowController {
             setExpanded(true)
             return
         }
-        if notchRect.contains(local),
-           let index = cellIndex(along: placement.along(of: local)),
-           model.snapshots.indices.contains(index) {
+        let clickedCell = notchRect.contains(local) ? cellIndex(along: placement.along(of: local)) : nil
+        if let clickedCell, clickedCell == model.clipboardIndex {
+            onToggleClipboard?()
+            return
+        }
+        if let index = clickedCell, model.snapshots.indices.contains(index) {
             if let onRefreshProvider {
                 let snapshot = model.snapshots[index]
                 Task { await model.refresh(snapshot, using: onRefreshProvider) }
@@ -1184,7 +1199,7 @@ final class NotchWindowController {
 
     func cellIndex(along: CGFloat) -> Int? {
         let pitch = model.cellPitch * model.sizeScale
-        for index in model.snapshots.indices {
+        for index in 0..<model.cellCount {
             let centre = model.slack + model.ringCenter(index: index) * model.sizeScale
             if abs(along - centre) <= pitch / 2 { return index }
         }
