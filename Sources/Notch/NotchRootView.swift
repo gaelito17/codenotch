@@ -346,13 +346,13 @@ struct NotchRootView: View {
 
         Group {
             if model.edge.isVertical {
-                VStack(spacing: model.cellSpacing) { stack; clipboardCell }
+                VStack(spacing: model.cellSpacing) { stack; clipboardCell; screenshotCell }
                     .padding(.top, leadIn)
                     // The contents keep the expanded layout while folding, so
                     // the stack does not reflow on its way out; the shape clips it.
                     .frame(width: NotchLayout.bodyDepth(for: model.edge))
             } else {
-                HStack(spacing: model.cellSpacing) { stack; clipboardCell }
+                HStack(spacing: model.cellSpacing) { stack; clipboardCell; screenshotCell }
                     .padding(.leading, leadIn)
                     .frame(height: NotchLayout.bodyDepth(for: model.edge))
             }
@@ -365,6 +365,16 @@ struct NotchRootView: View {
             placed(ClipboardCell(isHovered: model.hoveredIndex == index,
                                  isOpen: model.isClipboardOpen,
                                  count: model.clipboardEntries.count), index: index)
+        }
+    }
+
+    @ViewBuilder private var screenshotCell: some View {
+        if let index = model.screenshotIndex {
+            placed(ScreenshotCell(isHovered: model.hoveredIndex == index,
+                                  mode: model.screenshotMode), index: index)
+                // Tucked up against the clipboard cell, by as much as
+                // `ringCenter` moves it.
+                .padding(model.edge.isVertical ? .top : .leading, -model.screenshotTuck)
         }
     }
 

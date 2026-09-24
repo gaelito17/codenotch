@@ -26,7 +26,7 @@ extension View {
 /// crossing-and-notification machinery it switches is Notifications' to
 /// explain.
 private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
-    case accounts, phone, deepseek, ollama, lmstudio, customEndpoints, appearance, clipboard, notifications, general
+    case accounts, phone, deepseek, ollama, lmstudio, customEndpoints, appearance, clipboard, screenshot, notifications, general
 
     /// The sections the sidebar lists; Phone only once pairing is offered.
     static var visible: [SettingsSection] {
@@ -55,6 +55,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .customEndpoints: return L10n.t("Custom Endpoints")
         case .appearance:    return L10n.t("Appearance")
         case .clipboard:     return L10n.t("Clipboard")
+        case .screenshot:    return L10n.t("Screenshot")
         case .notifications: return L10n.t("Notifications")
         case .general:       return L10n.t("General")
         }
@@ -82,6 +83,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .customEndpoints: return L10n.t("OpenAI-compatible APIs, local runtimes and custom proxies.")
         case .appearance:    return L10n.t("How the notch looks and where it sits.")
         case .clipboard:     return L10n.t("A history of what you copy, one click from the notch.")
+        case .screenshot:    return L10n.t("A screenshot, one click from the notch.")
         case .notifications: return L10n.t("What Codenotch tells you, and when.")
         case .general:       return L10n.t("Startup, updates and everything else.")
         }
@@ -97,6 +99,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .customEndpoints: return "network"
         case .appearance:    return "paintbrush.fill"
         case .clipboard:     return "list.clipboard.fill"
+        case .screenshot:    return "camera.viewfinder"
         case .notifications: return "bell.badge.fill"
         case .general:       return "gearshape.fill"
         }
@@ -115,6 +118,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .customEndpoints: return .indigo
         case .appearance:    return .indigo
         case .clipboard:     return .brown
+        case .screenshot:    return .teal
         case .notifications: return .red
         case .general:       return .gray
         }
@@ -701,6 +705,8 @@ struct SettingsView: View {
             if let clipboard {
                 ClipboardSettingsView(preferences: preferences, clipboard: clipboard)
             }
+        case .screenshot:
+            ScreenshotSettingsView(preferences: preferences)
         case .notifications: notificationsPane
         case .general:       generalPane
         }

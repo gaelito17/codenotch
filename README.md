@@ -255,6 +255,18 @@ macOS asks before an app reads the clipboard in the background. Settings ›
 Clipboard shows what it has been told and links to **Privacy & Security ›
 Paste from Other Apps**, where Codenotch can be allowed.
 
+## Screenshot
+
+Off until you switch it on in **Settings › Screenshot**. Then a screenshot cell
+sits at the very end of the notch. Clicking it folds the notch out of the way
+and starts macOS' own capture — part of the screen by default, as ⇧⌘4 does. The
+same pane can make it capture a window (⇧⌘4 then Space) or the whole screen
+(⇧⌘3, one file per display). Escape cancels, as it always does.
+
+Files land in the folder chosen under **Saved to** in that pane. Until one is
+chosen — or if it is moved or deleted — they go where macOS saves its own
+screenshots, otherwise the Desktop. The format is the one macOS is set to.
+
 ## Placement
 
 The notch lives on any of the four screen edges. Right and left keep a
