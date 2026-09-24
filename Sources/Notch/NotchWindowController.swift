@@ -26,6 +26,9 @@ final class NotchWindowController {
     var onRefreshProvider: ((String) async -> Void)?
     /// Open the settings window, asked for by clicking the handle.
     var onOpenSettings: (() -> Void)?
+    /// Take a screenshot, asked for by clicking the screenshot cell. Calls
+    /// its argument once the capture is over, taken or cancelled.
+    var onTakeScreenshot: ((@escaping () -> Void) -> Void)?
     /// An ⌥-drag on the pill settled at a new `model.alongOffset`. The
     /// controller only holds the live value; persisting it per edge is
     /// Preferences' job, the same division `apply(edge:)` already keeps.
@@ -59,6 +62,12 @@ final class NotchWindowController {
     /// twitchy rather than responsive.
     private let foldGrace: TimeInterval = 0.45
     private var foldWork: DispatchWorkItem?
+    /// A screenshot is being taken: the notch stays folded out of it, and
+    /// out from under the crosshair, until the capture is over.
+    private(set) var isCapturingScreenshot = false
+    /// Long enough for the fold to finish, so a full-screen capture does not
+    /// catch the notch on its way in.
+    static let screenshotFoldPause: TimeInterval = 0.35
     /// Folds the notch again after a peek, when nothing else is holding it open.
     private var peekWork: DispatchWorkItem?
     /// The session a peek is currently offering, and how long the offer lasts.
@@ -237,6 +246,12 @@ final class NotchWindowController {
         // slack and end extents `relocate` reads are computed from the count,
         // and in willSet that is still the old one.
         model.$showsClipboardCell
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.relocate() }
+            .store(in: &cancellables)
+        model.$showsScreenshotCell
             .removeDuplicates()
             .dropFirst()
             .receive(on: RunLoop.main)
@@ -733,6 +748,7 @@ final class NotchWindowController {
     /// hold open — because answering it asks WindowServer.
     private func setExpanded(_ wanted: Bool, ignoreAlwaysOn: @autoclosure () -> Bool = false) {
         if wanted {
+            guard !isCapturingScreenshot else { return }
             foldWork?.cancel()
             foldWork = nil
             guard !model.isExpanded else { return }
@@ -867,6 +883,10 @@ final class NotchWindowController {
             withAnimation(NotchMotion.glide) { model.isClipboardOpen = true }
             return
         }
+        if let clickedCell, clickedCell == model.screenshotIndex {
+            takeScreenshot()
+            return
+        }
         if let index = clickedCell, model.snapshots.indices.contains(index) {
             if let onRefreshProvider {
                 let snapshot = model.snapshots[index]
@@ -875,6 +895,33 @@ final class NotchWindowController {
             return
         }
         togglePinned()
+    }
+
+    /// Folds the notch out of the way, then hands over to the capture. Pinned
+    /// and "Always show" are left as they were, and put the notch back once
+    /// the capture is over.
+    func takeScreenshot() {
+        guard !isCapturingScreenshot, let onTakeScreenshot else { return }
+        isCapturingScreenshot = true
+        foldWork?.cancel()
+        foldWork = nil
+        withAnimation(NotchMotion.unfold) {
+            model.isExpanded = false
+            model.hoveredIndex = nil
+        }
+        setPointing(false)
+        updateInteractiveRects()
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.screenshotFoldPause) { [weak self] in
+            MainActor.assumeIsolated {
+                onTakeScreenshot { [weak self] in
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        self.isCapturingScreenshot = false
+                        if self.model.isPinned || self.model.isAlwaysOn { self.setExpanded(true) }
+                    }
+                }
+            }
+        }
     }
 
     /// A click inside the open history, answered from where its rows were
@@ -1269,11 +1316,14 @@ final class NotchWindowController {
 
     func cellIndex(along: CGFloat) -> Int? {
         let pitch = model.cellPitch * model.sizeScale
-        for index in 0..<model.cellCount {
-            let centre = model.slack + model.ringCenter(index: index) * model.sizeScale
-            if abs(along - centre) <= pitch / 2 { return index }
-        }
-        return nil
+        // The nearest ring, not the first whose band holds the point: the
+        // screenshot cell sits closer to the clipboard's than a full pitch,
+        // so their bands overlap.
+        return (0..<model.cellCount)
+            .map { ($0, abs(along - (model.slack + model.ringCenter(index: $0) * model.sizeScale))) }
+            .filter { $0.1 <= pitch / 2 }
+            .min { $0.1 < $1.1 }?
+            .0
     }
 
     // MARK: - Odds and ends

@@ -79,6 +79,7 @@ final class NotchFleet {
     var onPickClipboardEntry: ((ClipboardEntry) -> Void)?
     var onRemoveClipboardEntry: ((UUID) -> Void)?
     var onClearClipboard: (() -> Void)?
+    var onTakeScreenshot: ((@escaping () -> Void) -> Void)?
     var signInItems: [(title: String, action: () -> Void)] = []
     /// An ⌥-drag on any one panel settled at a new offset. Persisting it is
     /// Preferences' job, same division `apply(edge:)` already keeps.
@@ -263,6 +264,20 @@ final class NotchFleet {
         for controller in controllers.values {
             controller.model.showsClipboardCell = shown
             controller.model.clipboardEntries = entries
+        }
+    }
+
+    // MARK: - Screenshot
+
+    private var showsScreenshot = false
+    private var screenshotMode: ScreenshotMode = .default
+
+    func setScreenshot(shown: Bool, mode: ScreenshotMode) {
+        showsScreenshot = shown
+        screenshotMode = mode
+        for controller in controllers.values {
+            controller.model.showsScreenshotCell = shown
+            controller.model.screenshotMode = mode
         }
     }
 
@@ -457,6 +472,9 @@ final class NotchFleet {
         controller.model.onClearClipboard = onClearClipboard
         controller.model.showsClipboardCell = showsClipboard
         controller.model.clipboardEntries = clipboardEntries
+        controller.onTakeScreenshot = onTakeScreenshot
+        controller.model.showsScreenshotCell = showsScreenshot
+        controller.model.screenshotMode = screenshotMode
         controller.onReposition = onReposition
         controller.onMoveToEdge = onMoveToEdge
         controller.signInItems = signInItems

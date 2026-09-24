@@ -40,6 +40,10 @@ enum NotchLayout {
     static let padTop       = Design.px(69.5)   // body top -> first ring
     static let padBottom    = Design.px(50.1)   // last label -> body bottom
     static let cellSpacing  = Design.px(83.5)   // label bottom -> next ring top
+    /// How much of the gap between the clipboard and screenshot cells is
+    /// taken out when both are there: they are the notch's two tools rather
+    /// than readings, and sit together as a pair.
+    static let toolPairTuck: CGFloat = 0.5
 
     // The resting pill. Not in the design frame — it is the notch folded away,
     // sized to read as a deliberate handle rather than a sliver of chrome.

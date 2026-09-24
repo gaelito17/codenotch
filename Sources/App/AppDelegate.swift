@@ -100,6 +100,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // notch would already have flashed on the default edge.
         let fleet = NotchFleet(scope: preferences.notchScope, edge: preferences.notchEdge)
         self.notchFleet = fleet
+        // The mode and folder are read at the click, so a change in Settings needs no
+        // plumbing to reach a capture already on its way.
+        fleet.onTakeScreenshot = { [weak preferences] done in
+            ScreenshotCapture.capture(mode: preferences?.screenshotMode ?? .default,
+                                     folder: preferences?.screenshotFolder,
+                                     toClipboard: preferences?.screenshotToClipboard ?? false) { _ in done() }
+        }
 
         // `CODENOTCH_DEMO=1` puts the design frame's three providers on screen
         // with its numbers, for screenshots and for eyeballing the layout.
@@ -108,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Sample copies rather than the real pasteboard: a screenshot of
             // the demo must never carry whatever was last copied.
             fleet.setClipboard(shown: true, entries: Fixtures.clipboardEntries())
+            fleet.setScreenshot(shown: true, mode: .default)
         } else {
             // DeepSeek's Platform usage page is a browser-session provider:
             // login is explicit, stays in Codenotch's own WKWebView store, and
@@ -359,6 +367,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             fleet.onPickClipboardEntry = { [weak clipboard] in clipboard?.pick($0) }
             fleet.onRemoveClipboardEntry = { [weak clipboard] in clipboard?.remove($0) }
             fleet.onClearClipboard = { [weak clipboard] in clipboard?.clear() }
+
+            // Off until chosen, like the clipboard: one more cell is not
+            // something to add to everyone's notch unasked.
+            Publishers.CombineLatest(preferences.$screenshotCellEnabled, preferences.$screenshotMode)
+                .receive(on: RunLoop.main)
+                .sink { [weak fleet] shown, mode in fleet?.setScreenshot(shown: shown, mode: mode) }
+                .store(in: &cancellables)
 
             let settings = SettingsWindowController(
                 preferences: preferences,

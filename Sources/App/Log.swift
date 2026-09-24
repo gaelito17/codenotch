@@ -9,4 +9,5 @@ enum Log {
     static let sessions = Logger(subsystem: "com.vinz.codenotch", category: "sessions")
     /// Counts and sizes only. What was copied never goes to the log.
     static let clipboard = Logger(subsystem: "com.vinz.codenotch", category: "clipboard")
+    static let screenshot = Logger(subsystem: "com.vinz.codenotch", category: "screenshot")
 }

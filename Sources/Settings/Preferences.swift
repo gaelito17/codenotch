@@ -62,6 +62,27 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(clipboardHistoryLimit, forKey: Keys.clipboardHistoryLimit) }
     }
 
+    /// The screenshot cell at the foot of the notch. Off until chosen.
+    @Published var screenshotCellEnabled: Bool {
+        didSet { defaults.set(screenshotCellEnabled, forKey: Keys.screenshotCellEnabled) }
+    }
+
+    /// What the screenshot cell captures: part of the screen, as ⇧⌘4 does,
+    /// unless told otherwise.
+    @Published var screenshotMode: ScreenshotMode {
+        didSet { defaults.set(screenshotMode.rawValue, forKey: Keys.screenshotMode) }
+    }
+
+    /// Screenshots go to the clipboard rather than to a file.
+    @Published var screenshotToClipboard: Bool {
+        didSet { defaults.set(screenshotToClipboard, forKey: Keys.screenshotToClipboard) }
+    }
+
+    /// The folder screenshots are saved to. Nil follows macOS' own choice.
+    @Published var screenshotFolder: String? {
+        didSet { defaults.set(screenshotFolder, forKey: Keys.screenshotFolder) }
+    }
+
 
     @Published var lmstudioEndpoint: String {
         didSet { defaults.set(lmstudioEndpoint, forKey: Keys.lmstudioEndpoint) }
@@ -475,6 +496,10 @@ final class Preferences: ObservableObject {
         static let phoneLinkPort = "phoneLinkPort"
         static let clipboardHistoryEnabled = "clipboardHistoryEnabled"
         static let clipboardHistoryLimit = "clipboardHistoryLimit"
+        static let screenshotCellEnabled = "screenshotCellEnabled"
+        static let screenshotMode = "screenshotMode"
+        static let screenshotFolder = "screenshotFolder"
+        static let screenshotToClipboard = "screenshotToClipboard"
 
         static let lmstudioEndpoint = "lmstudioEndpoint"
         static let introducedOllama = "introducedOllama"
@@ -747,6 +772,11 @@ final class Preferences: ObservableObject {
         self.clipboardHistoryEnabled = defaults.object(forKey: Keys.clipboardHistoryEnabled) as? Bool ?? false
         self.clipboardHistoryLimit = (defaults.object(forKey: Keys.clipboardHistoryLimit) as? Int)
             .flatMap { ClipboardHistory.limitChoices.contains($0) ? $0 : nil } ?? ClipboardHistory.defaultLimit
+        self.screenshotCellEnabled = defaults.object(forKey: Keys.screenshotCellEnabled) as? Bool ?? false
+        self.screenshotMode = defaults.string(forKey: Keys.screenshotMode)
+            .flatMap(ScreenshotMode.init(rawValue:)) ?? .default
+        self.screenshotFolder = defaults.string(forKey: Keys.screenshotFolder)
+        self.screenshotToClipboard = defaults.object(forKey: Keys.screenshotToClipboard) as? Bool ?? false
 
         self.lmstudioEndpoint = (try? LMStudioEndpoint.parse(
             defaults.string(forKey: Keys.lmstudioEndpoint)

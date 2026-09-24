@@ -11,12 +11,36 @@ final class NotchViewModel: ObservableObject {
         didSet { if !showsClipboardCell { isClipboardOpen = false } }
     }
 
-    /// Every cell in the stack. Geometry counts these; anything that needs a
-    /// provider indexes `snapshots`, whose bounds leave the clipboard cell out.
-    var cellCount: Int { snapshots.count + (showsClipboardCell ? 1 : 0) }
+    /// The screenshot cell, after the clipboard's. Off until switched on in
+    /// Settings, for the same reason.
+    @Published var showsScreenshotCell = false
+    /// What a click on it captures; its glyph says which.
+    @Published var screenshotMode: ScreenshotMode = .default
 
-    /// The clipboard cell's position in the stack — always the last.
+    /// Every cell in the stack. Geometry counts these; anything that needs a
+    /// provider indexes `snapshots`, whose bounds leave the clipboard and
+    /// screenshot cells out.
+    var cellCount: Int {
+        snapshots.count + (showsClipboardCell ? 1 : 0) + (showsScreenshotCell ? 1 : 0)
+    }
+
+    /// The clipboard cell's position in the stack — right after the providers.
     var clipboardIndex: Int? { showsClipboardCell ? snapshots.count : nil }
+
+    /// The screenshot cell's position in the stack — always the last.
+    var screenshotIndex: Int? {
+        showsScreenshotCell ? snapshots.count + (showsClipboardCell ? 1 : 0) : nil
+    }
+
+    /// How much closer the screenshot cell sits to the clipboard cell than
+    /// cells ordinarily sit to each other. Only the screenshot cell moves, and
+    /// it is the last, so this comes off the end of the shape and nothing else.
+    var screenshotTuck: CGFloat { screenshotTuck(cellCount: cellCount) }
+
+    private func screenshotTuck(cellCount: Int) -> CGFloat {
+        guard showsClipboardCell, showsScreenshotCell else { return 0 }
+        return cellSpacing(cellCount: cellCount) * NotchLayout.toolPairTuck
+    }
 
     /// Newest first, as the history holds them.
     @Published var clipboardEntries: [ClipboardEntry] = []
@@ -382,7 +406,7 @@ final class NotchViewModel: ObservableObject {
         // clear the hardware.
         let drawn = NotchLayout.shapeLength(
             cellCount: cellCount, edge: edge, flare: flare
-        )
+        ) - screenshotTuck(cellCount: cellCount)
         let wanted = hardwareNotch.width + 2 * NotchLayout.cornerRadius
         return max(0, (wanted - drawn) / 2)
     }
@@ -554,7 +578,7 @@ final class NotchViewModel: ObservableObject {
     var bodyLength: CGFloat {
         NotchLayout.bodyLength(
             cellCount: cellCount, edge: edge, spacing: cellSpacing
-        ) + 2 * endSpread
+        ) - screenshotTuck + 2 * endSpread
     }
 
     /// Distance along the stack to cell `index`'s ring centre, widening
@@ -562,6 +586,7 @@ final class NotchViewModel: ObservableObject {
     func ringCenter(index: Int) -> CGFloat {
         NotchLayout.ringCenter(index: index, edge: edge, flare: flare,
                               spacing: cellSpacing) + endSpread
+            - (index == screenshotIndex ? screenshotTuck : 0)
     }
 
     var cellSpacing: CGFloat { cellSpacing(cellCount: cellCount) }
@@ -763,6 +788,7 @@ final class NotchViewModel: ObservableObject {
         NotchLayout.shapeLength(cellCount: cellCount,
                                 edge: edge, flare: flare,
                                 spacing: cellSpacing(cellCount: cellCount))
+            - screenshotTuck(cellCount: cellCount)
             + 2 * endSpread(cellCount: cellCount)
     }
 
