@@ -221,12 +221,6 @@ final class FoldedNotchTests: XCTestCase {
         m.isExpanded = false
         XCTAssertEqual(open, m.panelSize)
     }
-
-    /// A 10pt target on a screen edge is fiddly, so the region that wakes it is
-    /// deliberately bigger than the pill it surrounds.
-    func testTheWakeRegionIsLargerThanThePill() {
-        XCTAssertGreaterThan(NotchLayout.pillHotZone, NotchLayout.pillWidth)
-    }
 }
 
 /// Motion is a vocabulary, not a pile of magic numbers.

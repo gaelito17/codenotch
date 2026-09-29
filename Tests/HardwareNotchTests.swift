@@ -151,13 +151,13 @@ final class MergedTopNotchTests: XCTestCase {
                        "the wake region reaches below the hardware, into the window under it")
     }
 
-    /// The pill keeps its band: it is the small target the band was made for.
-    func testThePillIsStillWokenByABandAroundIt() {
+    /// The pill has no band either: wanting to click something near the edge
+    /// must not open the notch over it.
+    func testThePillIsWokenOnlyAtTheScreenEdge() {
         let m = model(cells: 4, screen: plain)
         m.isExpanded = false
-        XCTAssertGreaterThan(m.wakeDepth, m.restingDepth,
-                             "the pill lost the band that makes it hittable")
-        XCTAssertGreaterThanOrEqual(m.wakeLength, m.restingLength)
+        XCTAssertEqual(m.wakeDepth, m.restingDepth, accuracy: 0.001)
+        XCTAssertEqual(m.wakeLength, m.restingLength, accuracy: 0.001)
     }
 
     func testAScreenWithoutOneInsetsNothing() {
