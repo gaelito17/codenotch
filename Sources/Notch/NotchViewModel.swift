@@ -727,20 +727,15 @@ final class NotchViewModel: ObservableObject {
     var restingLength: CGFloat { hardwareNotch?.width ?? NotchLayout.pillHeight }
     var restingDepth: CGFloat { hardwareNotch?.height ?? NotchLayout.pillWidth }
 
-    /// What wakes the folded notch, in panel points: the resting shape and a
-    /// band around it, or the resting shape alone.
+    /// What wakes the folded notch, in panel points: the resting shape and
+    /// nothing around it.
     ///
-    /// The band is for the pill. A 10pt sliver on a screen edge is a fiddly
-    /// target, and the only cost of surrounding it is that it opens a little
-    /// eagerly. Joined to the hardware notch the band is a different matter:
-    /// the notch is already a generous target, and a band around it reached
-    /// 34pt *below* the menu bar — across the title bar of a window tiled
-    /// against the centre of the screen, whose close, minimise and zoom
-    /// buttons then opened the notch on approach and disappeared under it.
-    /// Flush with the hardware, what wakes the notch is the notch.
-    var wakeLength: CGFloat { max(restingLength * sizeScale, wakeBand) }
-    var wakeDepth: CGFloat { restingDepth * sizeScale + wakeBand }
-    private var wakeBand: CGFloat { isFlushWithHardware ? 0 : NotchLayout.pillHotZone }
+    /// A band around the pill would be easier to hit, but it reached well in
+    /// from the screen edge and swallowed whatever sat there — buttons on the
+    /// right of the screen opened the notch on approach and disappeared under
+    /// it. The notch wakes when the pointer touches the edge, not before.
+    var wakeLength: CGFloat { restingLength * sizeScale }
+    var wakeDepth: CGFloat { restingDepth * sizeScale }
 
     /// The drawn size of the notch body, in panel axes.
     var notchSize: CGSize {
