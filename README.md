@@ -349,6 +349,23 @@ It creates a reusable `Codenotch Local Signing` certificate in your login
 keychain (no Apple Developer account needed) and re-signs the app. Grant the
 keychain prompt once more after signing; it will not ask again.
 
+### Installing a local build
+
+`make install` builds a Release copy, puts it in `/Applications` and opens it:
+
+```sh
+make install                # build, copy to /Applications, launch
+Scripts/sign-local.sh       # then sign it with the stable local identity
+```
+
+Run `Scripts/sign-local.sh` after every `make install`. The install is signed
+ad-hoc with the hardened runtime on, and macOS can then refuse to load the
+embedded Sparkle framework: the app aborts at launch (crash report: `Library
+not loaded: @rpath/Sparkle.framework … different Team IDs`). Re-signing fixes
+that and gives the app the stable identity described above. If you would rather
+not create the certificate, `codesign --force --deep --sign - /Applications/Codenotch.app`
+also lets it launch, but keychain grants will not stick.
+
 Run with `CODENOTCH_DEMO=1` to see fixed sample data instead of live readings.
 
 ## Architecture
