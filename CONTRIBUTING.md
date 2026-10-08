@@ -90,3 +90,50 @@ Include the unified log around the time it happened:
 ```sh
 /usr/bin/log show --last 10m --predicate 'subsystem == "com.vinz.codenotch"' --info --debug
 ```
+
+## Syncing this fork with upstream
+
+This fork (`gaelito17/codenotch`) carries three features on top of
+`vinzdg/codenotch`: the clipboard history cell, the screenshot cell (with its
+tuck against the clipboard cell) and wake-only-at-screen-edge. To pull in
+upstream without losing them:
+
+```sh
+git remote add upstream https://github.com/vinzdg/codenotch.git   # once
+git fetch upstream
+git log --oneline main..upstream/main      # what is new
+git stash                                  # upstream also touches .gitignore
+git checkout -b sync-upstream
+git merge upstream/main                    # never merge straight on main
+```
+
+Resolve the conflicts on that branch, keeping upstream's structure and
+re-applying the three features on top of it, then:
+
+```sh
+make test-ci                               # xcodegen + xcodebuild; all green
+git commit
+git checkout main && git merge --ff-only sync-upstream
+git push origin main
+git stash pop                              # keep both sides of .gitignore
+git branch -d sync-upstream
+```
+
+Where the features meet upstream's notch layout (the files that conflicted last
+time are `NotchViewModel`, `NotchRootView`, `NotchWindowController`,
+`NotchFleet`, `SettingsView` and `Tests/HardwareNotchTests`):
+
+- Geometry counts `cellCount` (providers + clipboard + screenshot), not
+  `snapshots.count`. Anything provider-specific keeps `snapshots`.
+- Rings are placed with `ringAlong(index:in: cellWing)` and
+  `leadAllowance`/`endAllowance`. The screenshot tuck is subtracted in
+  `ringCenter`, `bodyLength`, `shapeLength(cellCount:)` and `travelSize`.
+- `cellIndex(along:)` picks the nearest ring across `0..<cellCount`, because
+  the tucked cells' hover bands overlap.
+- Upstream's update card takes priority over the clipboard panel.
+- Wake-at-edge means no wake band around the pill: `wakeLength`/`wakeDepth` are
+  the resting shape. Adapt upstream tests that assume a band (they use
+  `NotchLayout.pillHotZone`) instead of restoring it.
+
+Tests only cover the geometry, so run the app afterwards and check the cells
+and hover cards on a notched Mac and on a side edge.
