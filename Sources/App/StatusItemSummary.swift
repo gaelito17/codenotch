@@ -103,6 +103,7 @@ struct StatusItemSummary: Equatable {
         let countdown = window?.resetsAt.flatMap { ResetCopy.countdown(to: $0, now: now) }
         let label = sharesMark
             ? ClaudeProfile.slug(fromProviderID: snapshot.id) ?? CodexProfile.slug(fromProviderID: snapshot.id)
+                ?? CommandCodeProfile.slug(fromProviderID: snapshot.id)
             : nil
         let weeklyWindow = showingWeeklyLimit ? snapshot.weeklyLimitWindow : nil
         let weeklyIsOver = weeklyWindow?.resetsAt.map { $0 <= now } ?? false
@@ -112,7 +113,12 @@ struct StatusItemSummary: Equatable {
         var detail = detail(for: snapshot, window: window, isOver: isOver,
                             countdown: countdown, now: now, format: format)
         if weeklyFraction != nil, let weeklyWindow {
-            detail += " · \(L10n.t("Weekly Limit")): \(weeklyWindow.summary)"
+            // The window's own label, the way the line above already names the
+            // headline window. "Weekly" was baked in here when every provider
+            // that had a second window called it that; QianwenAI's is a monthly
+            // allowance, Claude's is "All models", and a bar that relabels
+            // either one is reporting a window the provider never declared.
+            detail += " · \(weeklyWindow.label): \(weeklyWindow.summary)"
         }
         return Entry(
             id: snapshot.id,
@@ -165,16 +171,22 @@ struct StatusItemArtwork {
     let summary: StatusItemSummary
     let font: NSFont
     let height: CGFloat
+    /// Reduce Motion's stand-in for the pulse: a still dot on each working
+    /// provider's mark. It is part of the template image, so AppKit gives it
+    /// the same tint as the rest of the item.
+    let activityBadgeProviderIDs: Set<String>
 
     /// The menu bar's own type size, with figures of one width: "72%" and
     /// "18%" take the same room, so nothing jitters as the numbers move.
     init(summary: StatusItemSummary,
          font: NSFont = .monospacedDigitSystemFont(ofSize: NSFont.menuBarFont(ofSize: 0).pointSize,
                                                    weight: .regular),
-         height: CGFloat = NSStatusBar.system.thickness) {
+         height: CGFloat = NSStatusBar.system.thickness,
+         activityBadgeProviderIDs: Set<String> = []) {
         self.summary = summary
         self.font = font
         self.height = height
+        self.activityBadgeProviderIDs = activityBadgeProviderIDs
     }
 
     private enum Mark {
@@ -182,6 +194,8 @@ struct StatusItemArtwork {
         case text(String, NSPoint)
         /// The upright rule between two providers' readings.
         case rule(NSRect)
+        /// Reduce Motion's still indication, cut clear of the mark below it.
+        case activityBadge(NSRect)
     }
 
     private var separator: String { " · " }
@@ -193,35 +207,45 @@ struct StatusItemArtwork {
     /// say anything.
     private var ruleAlpha: CGFloat { 0.35 }
 
-    /// The widest either figure gets in the ordinary run of a window, measured
-    /// in the current language. Each is given at least this much room, so the
-    /// item keeps one width from the start of a window to its reset — the
-    /// items to its left would otherwise shuffle every time "10%" became "9%"
-    /// or "1h 00m" became "59m".
-    private var percentRoom: CGFloat { width("00%") }
-    private var countdownRoom: CGFloat {
-        let now = Date(timeIntervalSinceReferenceDate: 0)
-        return width(ResetCopy.countdown(to: now.addingTimeInterval(5 * 3600 - 30), now: now) ?? "")
-    }
-
+    /// As wide as what it says, and no wider.
+    ///
+    /// The figures used to be padded to the widest reading each could take, so
+    /// the item held one width from the start of a window to its reset. That
+    /// room is empty whenever the figures are shorter, and it is emptiest
+    /// exactly when the bar is most worth reading: "0% · 8m" is eight
+    /// characters printed in a space kept for thirteen, and no arrangement of
+    /// it inside the item looked like anything but a hole — in front of the
+    /// figure it left "0%" adrift of its own mark, behind it left the item
+    /// trailing blank into its neighbour.
+    ///
+    /// The width moves instead, and less often than the padding suggests:
+    /// monospaced digits mean it changes only when a figure gains or loses a
+    /// character, which across a whole five-hour window happens five times for
+    /// one provider — see `testTheItemChangesWidthOnlyAsTheFiguresChangeShape`.
     var size: NSSize { NSSize(width: layout().width, height: height) }
 
     func image() -> NSImage {
-        let (width, marks) = layout()
+        let (width, marks, _) = layout()
         let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { _ in
             for (mark, alpha) in marks { draw(mark, alpha: alpha) }
             return true
         }
+        image.cacheMode = .always
         image.isTemplate = true
         return image
     }
 
-    private func layout() -> (width: CGFloat, marks: [(Mark, CGFloat)]) {
+    func glyphFrame(for providerID: String) -> NSRect? {
+        layout().glyphFrames[providerID]
+    }
+
+    private func layout() -> (width: CGFloat, marks: [(Mark, CGFloat)], glyphFrames: [String: NSRect]) {
         // Figures centred on the bar by their cap height, which is what the eye
         // measures digits by; the marks are centred on the same line.
         let baseline = ((height - font.capHeight) / 2 * 2).rounded() / 2
         let middle = baseline + font.capHeight / 2
         var marks: [(Mark, CGFloat)] = []
+        var glyphFrames: [String: NSRect] = [:]
         var x: CGFloat = 0
         func text(_ string: String, alpha: CGFloat) {
             marks.append((.text(string, NSPoint(x: x, y: baseline)), alpha))
@@ -239,7 +263,11 @@ struct StatusItemArtwork {
             }
             let alpha: CGFloat = entry.isStale ? 0.5 : 1
             let box = NSRect(x: x, y: middle - glyphSize / 2, width: glyphSize, height: glyphSize)
+            glyphFrames[entry.id] = box
             marks.append((.glyph(entry.glyph, box, weeklyFraction: entry.weeklyFraction), alpha))
+            if activityBadgeProviderIDs.contains(entry.id) {
+                marks.append((.activityBadge(activityBadge(on: box)), alpha))
+            }
             x += glyphSize + glyphGap
             if let label = entry.label {
                 text(label, alpha: alpha)
@@ -249,18 +277,22 @@ struct StatusItemArtwork {
                 text(StatusItemSummary.Entry.unknown, alpha: alpha)
                 continue
             }
-            // Right-aligned, so the "%" stays put and the figure grows leftward.
-            let percentWidth = width(entry.percent)
-            x += max(0, percentRoom - percentWidth)
             text(entry.percent, alpha: alpha)
             if !summary.isCompact {
                 text(separator, alpha: alpha)
-                let start = x
                 text(entry.countdown, alpha: alpha)
-                x = max(x, start + countdownRoom)
             }
         }
-        return (x.rounded(.up), marks)
+        return (x.rounded(.up), marks, glyphFrames)
+    }
+
+    /// The badge sits in the lower trailing corner, where macOS icon badges
+    /// normally sit, and lands on whole points so it stays round at 1x.
+    private func activityBadge(on box: NSRect) -> NSRect {
+        let diameter = max(3, (glyphSize * 0.32).rounded())
+        return NSRect(x: (box.maxX - diameter * 0.8).rounded(),
+                      y: (box.minY - diameter * 0.2).rounded(),
+                      width: diameter, height: diameter)
     }
 
     private func width(_ string: String) -> CGFloat {
@@ -336,6 +368,15 @@ struct StatusItemArtwork {
             }
             ink.setFill()
             path.fill()
+        case .activityBadge(let dot):
+            // A clear ring separates the dot from the mark it overlaps.
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current?.compositingOperation = .destinationOut
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: dot.insetBy(dx: -1.5, dy: -1.5)).fill()
+            NSGraphicsContext.restoreGraphicsState()
+            ink.setFill()
+            NSBezierPath(ovalIn: dot).fill()
         }
     }
 }

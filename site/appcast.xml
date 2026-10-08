@@ -3,12 +3,20 @@
     <channel>
         <title>Codenotch</title>
         <item>
-            <title>1.17.0</title>
-            <pubDate>Wed, 09 Sep 2026 09:56:29 +0700</pubDate>
-            <sparkle:version>20</sparkle:version>
-            <sparkle:shortVersionString>1.17.0</sparkle:shortVersionString>
+            <title>1.22.0</title>
+            <pubDate>Tue, 06 Oct 2026 15:18:27 +0700</pubDate>
+            <sparkle:version>24</sparkle:version>
+            <sparkle:shortVersionString>1.22.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://hivinz.com/Codenotch.dmg" length="11532827" type="application/octet-stream" sparkle:edSignature="63jG1cCXNXvZbD2cSgOznEEjKm717oKA9FNsTAii3Onwhk9wN7sAbggo0ITyEQ4jGmPo+2MenMlrljlgPMEeAQ=="/>
+            <description><![CDATA[<p>Qoder's credits, more than one Command Code account, and DeepSeek's balance from the wallet that has one.</p>
+<ul>
+<li><b>Qoder</b>: a ring for your credits, international or China mainland.</li>
+<li><b>More than one Command Code account</b>, each its own ring.</li>
+<li><b>DeepSeek's balance from the funded wallet.</b></li>
+<li><b>Українська</b>, up to date.</li>
+</ul>
+]]></description>
+            <enclosure url="https://hivinz.com/Codenotch-1.22.0.dmg" length="12539050" type="application/octet-stream" sparkle:edSignature="LQKgAU5TlcmJscVui3QIJGTLUzUtQQSQ/YqqMT2IKSsdvjEp1hHgIQ21phRyZe8WGL74Dhi5o3kdqBPNAm6ZCQ=="/>
         </item>
     </channel>
 </rss>

@@ -33,6 +33,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let previewResetAlert: (() -> Void)?
     private let previewSessionLimitAlert: (() -> Void)?
     private let previewWeeklyLimitAlert: (() -> Void)?
+    private let sendTestNotification: (() -> Void)?
 
     init(preferences: Preferences,
          providers: @escaping () -> [ProviderSummary],
@@ -46,6 +47,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
          previewResetAlert: (() -> Void)? = nil,
          previewSessionLimitAlert: (() -> Void)? = nil,
          previewWeeklyLimitAlert: (() -> Void)? = nil,
+         sendTestNotification: (() -> Void)? = nil,
          usageStore: UsageStore? = nil,
          ollamaRelay: OllamaActivityRelay? = nil,
          lmstudioMetrics: LMStudioMetrics? = nil,
@@ -62,6 +64,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.previewResetAlert = previewResetAlert
         self.previewSessionLimitAlert = previewSessionLimitAlert
         self.previewWeeklyLimitAlert = previewWeeklyLimitAlert
+        self.sendTestNotification = sendTestNotification
         self.switchAccount = switchAccount
         self.retry = retry
         self.updater = updater
@@ -271,7 +274,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                                    usageStore: usageStore, clipboard: clipboard,
                                    previewResetAlert: previewResetAlert,
                                    previewSessionLimitAlert: previewSessionLimitAlert,
-                                   previewWeeklyLimitAlert: previewWeeklyLimitAlert)
+                                   previewWeeklyLimitAlert: previewWeeklyLimitAlert,
+                                   sendTestNotification: sendTestNotification)
         )
         window.center()
         window.isReleasedWhenClosed = false

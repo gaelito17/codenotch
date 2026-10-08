@@ -168,9 +168,15 @@ final class Preferences: ObservableObject {
     }
 
     /// Where the slider may go. Wider than the presets at both ends, but not
-    /// unbounded: below about three quarters the percentage under each ring
-    /// stops being readable, which is the one thing the notch exists for.
-    static let customScaleRange: ClosedRange<Double> = 0.75...1.5
+    /// unbounded.
+    ///
+    /// The floor was three quarters, because below that the percentage under
+    /// each ring stopped being readable — and that is the one thing the notch
+    /// exists for. The reading is a setting of its own now (`showsNotchReadings`),
+    /// so anyone who wants the notch smaller than the type allows can turn the
+    /// type off and keep the rings, which read as colour and fill at any size.
+    /// Half is as small as a ring stays legible as a ring.
+    static let customScaleRange: ClosedRange<Double> = 0.5...1.5
 
     /// What the notch is actually drawn at, whichever control is in charge.
     var notchScale: CGFloat {
@@ -232,10 +238,31 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(showUsagePace, forKey: Self.showUsagePaceKey) }
     }
 
+    /// Whether pointing at a ring, or opening the menu bar's menu, refuses every
+    /// reading a provider is holding and asks the provider itself.
+    ///
+    /// Off by default, and it has to be: it is not strictly better. A look
+    /// already asks for a live reading, which is served from a cache only while
+    /// that cache is newer than a couple of minutes. This spends a request even
+    /// when the cache was written seconds ago — and on a provider that rate
+    /// limits, one request too many is answered with a back-off that then holds
+    /// a number older than the cache would have been. Worth having for somebody
+    /// comparing Codenotch against a vendor's own dashboard figure by figure;
+    /// not worth making everybody pay for.
+    @Published var asksProviderOnLook: Bool {
+        didSet { defaults.set(asksProviderOnLook, forKey: Keys.asksProviderOnLook) }
+    }
+
     /// Whether Claude's big ring shows the day's share of the weekly limit
     /// instead of the session. See `DailyPace`.
     @Published var claudeDailyPaceRing: Bool {
         didSet { defaults.set(claudeDailyPaceRing, forKey: Keys.claudeDailyPaceRing) }
+    }
+
+    /// Whether the big ring shows the weekly limit instead of the shorter
+    /// window, for every provider that has both. See `WeeklyHeadline`.
+    @Published var weeklyHeadline: Bool {
+        didSet { defaults.set(weeklyHeadline, forKey: Keys.weeklyHeadline) }
     }
 
     /// Whether Spark and code-review Codex windows appear in the hover card.
@@ -272,18 +299,30 @@ final class Preferences: ObservableObject {
     }
 
     /// Whether the weekly limit gets a ring of its own, and where it sits.
+    /// Whether each ring carries its percentage under it, on every edge.
+    ///
+    /// On by default, which is what the notch has always drawn everywhere but
+    /// the strip beside a Mac's own cutout. There it costs ring size, because
+    /// the bar is the cutout's depth and one ring already fills it — see
+    /// `NotchViewModel.showsCellReading`.
+    @Published var showsNotchReadings: Bool {
+        didSet { defaults.set(showsNotchReadings, forKey: Keys.showsNotchReadings) }
+    }
+
     @Published var weeklyRingDashed: Bool {
         didSet { defaults.set(weeklyRingDashed, forKey: Keys.weeklyRingDashed) }
+    }
+
+    /// Whether the reading under each ring adds the weekly ring's percentage,
+    /// as "30%/70%". Only while the weekly ring is on.
+    @Published var weeklyReading: Bool {
+        didSet { defaults.set(weeklyReading, forKey: Keys.weeklyReading) }
     }
 
     @Published var weeklyRing: WeeklyRing {
         didSet { defaults.set(weeklyRing.rawValue, forKey: Keys.weeklyRing) }
     }
 
-    /// Whether the move handle's arc is drawn above the notch.
-    @Published var showsMoveHandle: Bool {
-        didSet { defaults.set(showsMoveHandle, forKey: Keys.showsMoveHandle) }
-    }
 
     /// The colour used for positive usage and active-work indicators.
     @Published var accentColor: AccentColorChoice {
@@ -311,6 +350,11 @@ final class Preferences: ObservableObject {
         }
     }
 
+    /// Hard step or continuous ramp — see `ColorTransitionStyle`.
+    @Published var colorTransitionStyle: ColorTransitionStyle {
+        didSet { defaults.set(colorTransitionStyle.rawValue, forKey: Keys.colorTransitionStyle) }
+    }
+
     /// The language the app itself speaks.
     ///
     /// `.system` follows the Mac. Written through `L10n.apply` so the store
@@ -322,6 +366,12 @@ final class Preferences: ObservableObject {
     /// Where the app itself shows up: Dock, menu bar, or nowhere.
     @Published var appPresence: AppPresence {
         didSet { defaults.set(appPresence.rawValue, forKey: Keys.presence) }
+    }
+
+    /// Where every notification goes: the notch, or a banner. One choice for
+    /// all of them; which events notify stays a switch per event.
+    @Published var notificationChannel: NotificationChannel {
+        didSet { defaults.set(notificationChannel.rawValue, forKey: Keys.notificationChannel) }
     }
 
     /// Whether the menu bar item shows five-hour limits instead of its icon.
@@ -455,6 +505,10 @@ final class Preferences: ObservableObject {
         }
     }
 
+    @Published var qoderRegion: Sites.QoderRegion {
+        didSet { defaults.set(qoderRegion.rawValue, forKey: Keys.qoderRegion) }
+    }
+
     /// Which MiniMax console the Coding Plan is read from.
     ///
     /// International and China mainland are different hosts, and a key issued
@@ -511,6 +565,7 @@ final class Preferences: ObservableObject {
         static let visibility = "notchVisibility"
         static let foldsForFullScreen = "foldsForFullScreen"
         static let presence = "appPresence"
+        static let notificationChannel = "notificationChannel"
         static let showsLimitsInMenuBar = "showsLimitsInMenuBar"
         static let showsWeeklyLimitInMenuBar = "showsWeeklyLimitInMenuBar"
         static let menuBarProviders = "menuBarProviders"
@@ -521,16 +576,20 @@ final class Preferences: ObservableObject {
         static let customSize = "customNotchScale"
         static let display = "notchDisplay"
         static let resetTimeFormat = "resetTimeFormat"
+        static let asksProviderOnLook = "asksProviderOnLook"
         static let scope = "notchScope"
         static let accentColor = "accentColor"
         // A new key, so there is nothing under the old app name to migrate.
         static let weeklyRing = "weeklyRing"
         static let weeklyRingDashed = "weeklyRingDashed"
+        static let showsNotchReadings = "showsNotchReadings"
+        static let weeklyReading = "weeklyReading"
         static let claudeDailyPaceRing = "claudeDailyPaceRing"
-        static let showsMoveHandle = "showsMoveHandle"
+        static let weeklyHeadline = "weeklyHeadline"
         static let notchSurfaceStyle = "notchSurfaceStyle"
         static let watchLimit = "watchLimit"
         static let criticalLimit = "criticalLimit"
+        static let colorTransitionStyle = "colorTransitionStyle"
         static let customEndpoints = "customEndpoints"
         static let lastSeenVersion = "lastSeenVersion"
         static let order = "providerOrder"
@@ -549,6 +608,7 @@ final class Preferences: ObservableObject {
         /// A new key, so there is nothing under the old app name to migrate.
         static let geminiAPIMonthlyTokenBudget = "geminiAPIMonthlyTokenBudget"
         static let minimaxRegion = "minimaxRegion"
+        static let qoderRegion = "qoderRegion"
         static let antigravityHeadlineLimit = "antigravityHeadlineLimit"
         static let antigravityHeadlineModel = "antigravityHeadlineModel"
         static let deepSeekPricingEnabled = "deepSeekPricingEnabled"
@@ -644,6 +704,18 @@ final class Preferences: ObservableObject {
               let endpoints = try? JSONDecoder().decode([CustomEndpoint].self, from: data)
         else { return [] }
         return endpoints
+    }
+
+    nonisolated static func updateStoredCustomEndpoint(
+        _ endpoint: CustomEndpoint,
+        defaults: UserDefaults = .standard
+    ) {
+        var endpoints = storedCustomEndpoints(defaults: defaults)
+        guard let index = endpoints.firstIndex(where: { $0.id == endpoint.id }) else { return }
+        endpoints[index] = endpoint
+        if let data = try? JSONEncoder().encode(endpoints) {
+            defaults.set(data, forKey: Keys.customEndpoints)
+        }
     }
 
     /// The MiniMax region read straight from disk, off the main actor.
@@ -797,6 +869,10 @@ final class Preferences: ObservableObject {
         // to learn it is running.
         self.appPresence = defaults.string(forKey: Keys.presence)
             .flatMap(AppPresence.init(rawValue:)) ?? .dock
+        // The notch, because that is what every earlier version did; a banner
+        // is the choice of someone who found the notch too quiet.
+        self.notificationChannel = defaults.string(forKey: Keys.notificationChannel)
+            .flatMap(NotificationChannel.init(rawValue:)) ?? .notch
         // Absent means never chosen, which is the icon every earlier version
         // drew — see `showsLimitsInMenuBar`.
         self.showsLimitsInMenuBar = defaults.bool(forKey: Keys.showsLimitsInMenuBar)
@@ -825,9 +901,15 @@ final class Preferences: ObservableObject {
         self.resetTimeFormat = defaults.string(forKey: Keys.resetTimeFormat)
             .flatMap(ResetTimeFormat.init(rawValue:)) ?? .automatic
         self.showUsagePace = defaults.bool(forKey: Self.showUsagePaceKey)
+        // Off by default: see the property. A request spent on every look is a
+        // choice, and on a rate-limited provider it can cost freshness rather
+        // than buy it.
+        self.asksProviderOnLook = defaults.bool(forKey: Keys.asksProviderOnLook)
         // Off by default: it swaps what Claude's ring means, and that is a
         // choice for whoever budgets their week that way.
         self.claudeDailyPaceRing = defaults.bool(forKey: Keys.claudeDailyPaceRing)
+        // Off by default for the same reason: it changes what every ring means.
+        self.weeklyHeadline = defaults.bool(forKey: Keys.weeklyHeadline)
         self.showCodexExtraLimits = Self.storedShowCodexExtraLimits(defaults: defaults)
         self.deepSeekPricingEnabled = defaults.object(forKey: Keys.deepSeekPricingEnabled) as? Bool ?? true
         if let data = defaults.data(forKey: Keys.deepSeekPricingSchedule),
@@ -849,12 +931,13 @@ final class Preferences: ObservableObject {
         // Off by default: an extra arc in a 44pt circle is a change to how
         // every reading looks, and nobody asked for it on their behalf.
         self.weeklyRingDashed = defaults.object(forKey: Keys.weeklyRingDashed) as? Bool ?? false
+        self.showsNotchReadings = defaults.object(forKey: Keys.showsNotchReadings) as? Bool ?? true
+        self.weeklyReading = defaults.object(forKey: Keys.weeklyReading) as? Bool ?? false
 
         self.weeklyRing = defaults.string(forKey: Keys.weeklyRing)
             .flatMap(WeeklyRing.init(rawValue:)) ?? .off
         // On unless turned off: it is how the notch is carried to another edge,
         // and a control that is missing by default is one nobody finds.
-        self.showsMoveHandle = defaults.object(forKey: Keys.showsMoveHandle) as? Bool ?? true
         self.accentColor = defaults.string(forKey: Keys.accentColor)
             .flatMap(AccentColorChoice.init(rawValue:)) ?? .system
         self.notchSurfaceStyle = defaults.string(forKey: Keys.notchSurfaceStyle)
@@ -866,6 +949,8 @@ final class Preferences: ObservableObject {
         let critical = min(max(storedCriticalLimit, 0.02), 1.0)
         self.criticalLimit = critical
         self.watchLimit = min(max(storedWatchLimit, 0.01), critical - 0.01)
+        self.colorTransitionStyle = defaults.string(forKey: Keys.colorTransitionStyle)
+            .flatMap(ColorTransitionStyle.init(rawValue:)) ?? .hardStep
         // Absent means never chosen, which is follow-the-Mac.
         self.language = defaults.string(forKey: L10n.languageDefaultsKey)
             .flatMap(AppLanguage.init(rawValue:)) ?? .system
@@ -896,6 +981,7 @@ final class Preferences: ObservableObject {
             ?? SessionChime.defaultBlocked
         self.geminiAPIMonthlyTokenBudget = Self.storedGeminiAPIMonthlyTokenBudget(defaults: defaults)
         self.minimaxRegion = Self.storedMinimaxRegion(defaults: defaults)
+        self.qoderRegion = Sites.QoderRegion(rawValue: defaults.string(forKey: Keys.qoderRegion) ?? "") ?? .global
         if let data = defaults.data(forKey: Keys.customEndpoints),
            let list = try? JSONDecoder().decode([CustomEndpoint].self, from: data) {
             self.customEndpoints = Self.movingLegacyKeysToKeychain(list, defaults: defaults)
@@ -918,8 +1004,36 @@ final class Preferences: ObservableObject {
 
     func updateCustomEndpoint(_ endpoint: CustomEndpoint) {
         if let idx = customEndpoints.firstIndex(where: { $0.id == endpoint.id }) {
-            customEndpoints[idx] = endpoint
-            setConnected(endpoint.isEnabled, for: endpoint.providerID)
+            var merged = endpoint
+            // Check latest stored endpoint in UserDefaults to merge latest readings if mapping hasn't changed
+            let storedList = Self.storedCustomEndpoints(defaults: defaults)
+            if let stored = storedList.first(where: { $0.id == endpoint.id }) {
+                let mappingUnchanged = (stored.usageSource == endpoint.usageSource)
+                    && (stored.usagePreset == endpoint.usagePreset)
+                    && (stored.usageURL == endpoint.usageURL)
+                    && (stored.usageRecordsPath == endpoint.usageRecordsPath)
+                    && (stored.usageModelField == endpoint.usageModelField)
+                    && (stored.usageTokenField == endpoint.usageTokenField)
+                    && (stored.usageModelFilter == endpoint.usageModelFilter)
+                    && (stored.trackingUnit == endpoint.trackingUnit)
+
+                // If mapping is unchanged and user did not explicitly reset or edit readings:
+                // When the editor loaded, it had stored (or earlier) readings. If the user didn't change them
+                // in the editor, we preserve the latest stored readings that might have been sampled in the background.
+                if mappingUnchanged {
+                    if merged.currentTokensUsedM == customEndpoints[idx].currentTokensUsedM {
+                        merged.currentTokensUsedM = stored.currentTokensUsedM
+                    }
+                    if merged.usageHistory == customEndpoints[idx].usageHistory {
+                        merged.usageHistory = stored.usageHistory
+                    }
+                    if merged.currentSpendUSD == customEndpoints[idx].currentSpendUSD {
+                        merged.currentSpendUSD = stored.currentSpendUSD
+                    }
+                }
+            }
+            customEndpoints[idx] = merged
+            setConnected(merged.isEnabled, for: merged.providerID)
         }
     }
 

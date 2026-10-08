@@ -92,3 +92,31 @@ The upstream MIT copyright and license are included in
 `Sources/Resources/LobeIcons-LICENSE.txt` and copied into the app bundle.
 `LocalModelBrandTests` verifies asset lookup, nonempty nonrectangular native
 rendering and the bundled license; notch and tooltip fixtures cover all marks.
+
+## Apify
+
+`Sources/Assets.xcassets/glyph-apify.imageset/apify.svg` is Apify's own mark,
+the three-piece "A" served as the site favicon at
+[apify.com/favicon.svg](https://apify.com/favicon.svg), retrieved on
+2026-09-25. The original is three colours (blue, green and orange) on a 1080 px
+box; `ProviderGlyphView` tints everything one colour, so the three paths keep
+their geometry and lose their fills (`fill="#000"` on the root, numeric
+`width="24"` / `height="24"`), and the `viewBox` is cropped to the ink
+(`78.22 78.22 923.56 923.56`) so the mark fills its box the way the traced
+outlines do. The gaps between the pieces are what keep it legible in one
+colour. Image set marked as a template with vector data preserved;
+`ApifyProviderTests.testTheGlyphAssetRendersAsAMarkNotASquare` checks the
+native render.
+
+## llama.cpp
+
+`glyph-llamacpp` uses the official `icon/icon-dark.svg` from
+[ggml-org/llama.brand](https://github.com/ggml-org/llama.brand/tree/0708f2327336589bd4d3eba15a95199c318cd771),
+retrieved 2026-09-28. The original two paths and viewBox are unchanged; the
+asset is scaled and rendered as a template by `ProviderGlyphView`.
+
+The asset is CC BY-NC 4.0 with explicit additional permission for identifying
+llama.cpp in software distributions, including commercial distributions, and
+for scaling and monochrome rendering. This asset is not MIT-licensed. The
+license, source credit, and additional brand permission ship in
+`Sources/Resources/LlamaBrand-LICENSE.txt` and `LlamaBrand-NOTICE.txt`.

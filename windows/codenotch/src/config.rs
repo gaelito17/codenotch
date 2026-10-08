@@ -64,8 +64,27 @@ pub struct Config {
     /// Where the weekly limit gets a ring of its own: "off", "inside" or "outside".
     #[serde(default = "default_weekly_ring")]
     pub weekly_ring: String,
+    /// true = the weekly ring's track and its own arc are drawn in small dashes rather than a
+    /// solid line, as the Mac's "Dashed weekly ring" switch does. Only means anything while
+    /// `weekly_ring` is not "off". Off by default: an extra visual change nobody asked for.
+    #[serde(default)]
+    pub weekly_ring_dashed: bool,
+    /// How a usage ring changes colour: "hard_step" or "ramp".
+    #[serde(default = "default_color_transition")]
+    pub color_transition: String,
+    /// Where a ring turns from Ample to Watch, as a fraction of the limit. The Mac's own default.
+    #[serde(default = "default_watch_limit")]
+    pub watch_limit: f64,
+    /// Where a ring turns from Watch to Critical, as a fraction of the limit. Kept above
+    /// `watch_limit` by `clamp_watch_limit`/`clamp_critical_limit`, the same order the Mac's own
+    /// `didSet` pair enforces.
+    #[serde(default = "default_critical_limit")]
+    pub critical_limit: f64,
     /// Which appearance the pages draw in: "system", "light" or "dark".
-    #[serde(default = "default_theme")]
+    #[serde(
+        default = "default_theme",
+        deserialize_with = "deserialize_theme_or_system"
+    )]
     pub theme: String,
     /// Which providers the notch itself shows, in order. Empty means every provider that has
     /// something to report — the original behaviour, and the default. Superseded by `notch_slots`,
@@ -85,6 +104,12 @@ pub struct Config {
     /// notch once; an explicit later un-tick is respected and never overridden.
     #[serde(default)]
     pub glm_notch_fixed: bool,
+    /// The same one-shot migration for the OpenCode ring.
+    #[serde(default)]
+    pub opencode_notch_fixed: bool,
+    /// The same one-shot migration for the GitHub Copilot ring.
+    #[serde(default)]
+    pub copilot_notch_fixed: bool,
     /// false = the pill is kept off the screen edge entirely; the tray icon is then the only way in
     #[serde(default = "yes")]
     pub notch_visible: bool,
@@ -98,9 +123,16 @@ pub struct Config {
     /// leave the app running with no way to reach it.
     #[serde(default = "yes")]
     pub tray_visible: bool,
-    /// false = no arc above the notch to carry it by. Nothing is lost: Appearance → Edge moves it too.
+    /// Show a temporary card when any provider (Claude, Codex, Cursor, …) renews a used quota window.
     #[serde(default = "yes")]
-    pub show_move_handle: bool,
+    pub reset_notifications: bool,
+    /// false = the reset card above appears silently, with no notification sound.
+    #[serde(default = "yes")]
+    pub reset_notification_sound: bool,
+    /// true = the folded pill follows what is behind it, which means reading the screen beside it
+    /// (backdrop.rs). Opt-in for that reason; off, the pill takes Theme's colour.
+    #[serde(default)]
+    pub adaptive_pill: bool,
 }
 
 fn default_notch_y() -> f64 {
@@ -167,6 +199,26 @@ fn default_scale() -> f64 {
 fn default_weekly_ring() -> String {
     "off".into()
 }
+fn default_color_transition() -> String {
+    "hard_step".into()
+}
+pub fn default_watch_limit() -> f64 {
+    0.5
+}
+pub fn default_critical_limit() -> f64 {
+    0.7
+}
+
+/// Keeps `watch_limit` at least 0.01 below `critical_limit`, the same range the Mac's own slider
+/// (0.01...0.99, tightened against the sibling) allows.
+pub fn clamp_watch_limit(watch: f64, critical: f64) -> f64 {
+    watch.clamp(0.01, (critical - 0.01).max(0.01))
+}
+
+/// Keeps `critical_limit` at least 0.01 above `watch_limit`, mirroring `clamp_watch_limit`.
+pub fn clamp_critical_limit(critical: f64, watch: f64) -> f64 {
+    critical.clamp((watch + 0.01).min(1.0), 1.0)
+}
 fn default_theme() -> String {
     "system".into()
 }
@@ -179,12 +231,32 @@ pub fn theme_or_system(value: &str) -> String {
     }
 }
 
+/// A malformed theme must not leave the JSON parser mid-value and discard the user's other choices.
+fn deserialize_theme_or_system<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<serde_json::Value>::deserialize(deserializer)
+        .ok()
+        .flatten()
+        .and_then(|value| value.as_str().map(theme_or_system))
+        .unwrap_or_else(default_theme))
+}
+
 /// A second arc changes how every reading looks, so an unreadable value means off rather than a
 /// guess at what was meant.
 pub fn weekly_ring_or_off(value: &str) -> String {
     match value {
         "inside" | "outside" => value.to_string(),
         _ => default_weekly_ring(),
+    }
+}
+
+/// A new colour blend is opt-in, so an unknown value keeps the existing hard steps.
+pub fn color_transition_or_step(value: &str) -> String {
+    match value {
+        "ramp" => value.to_string(),
+        _ => default_color_transition(),
     }
 }
 fn yes() -> bool {
@@ -219,16 +291,24 @@ impl Default for Config {
             notch_monitor: None,
             scale: default_scale(),
             weekly_ring: default_weekly_ring(),
+            weekly_ring_dashed: false,
+            color_transition: default_color_transition(),
+            watch_limit: default_watch_limit(),
+            critical_limit: default_critical_limit(),
             theme: default_theme(),
             notch_providers: Vec::new(), // empty = show them all
             notch_slots: Vec::new(),     // filled in by load(), from notch_providers
             antigravity_limit: default_antigravity_limit(),
             antigravity_model: default_antigravity_model(),
             glm_notch_fixed: true, // a fresh install picks from the full list already
+            opencode_notch_fixed: true,
+            copilot_notch_fixed: true,
             notch_visible: true,
             notch_on_hover: true,
             tray_visible: true,
-            show_move_handle: true,
+            reset_notifications: true,
+            reset_notification_sound: true,
+            adaptive_pill: false,
         }
     }
 }
@@ -262,6 +342,10 @@ pub fn load() -> Config {
     carry_shared_position(&mut cfg);
     // A selection saved before GLM existed gets the GLM ring back exactly once.
     migrate_glm_notch(&mut cfg, &raw);
+    // Likewise for OpenCode.
+    migrate_opencode_notch(&mut cfg, &raw);
+    // And for GitHub Copilot.
+    migrate_copilot_notch(&mut cfg, &raw);
 
     // Both hidden would leave the app unreachable: no pill, no tray icon, no way to open settings.
     if !cfg.notch_visible && !cfg.tray_visible {
@@ -271,7 +355,12 @@ pub fn load() -> Config {
     // The old slider's 40–100 %, or a hand-edited file, lands on one of the three sizes
     cfg.scale = snap_scale(cfg.scale);
     cfg.weekly_ring = weekly_ring_or_off(&cfg.weekly_ring);
+    cfg.color_transition = color_transition_or_step(&cfg.color_transition);
     cfg.theme = theme_or_system(&cfg.theme);
+    // A stored pair that crossed over (or predates this setting) is repaired the same order the
+    // Mac's own init does: critical first, then watch below it.
+    cfg.critical_limit = cfg.critical_limit.clamp(0.02, 1.0);
+    cfg.watch_limit = clamp_watch_limit(cfg.watch_limit, cfg.critical_limit);
     cfg
 }
 
@@ -290,6 +379,36 @@ fn migrate_glm_notch(cfg: &mut Config, raw: &Option<String>) {
     cfg.glm_notch_fixed = true;
 }
 
+fn migrate_opencode_notch(cfg: &mut Config, raw: &Option<String>) {
+    let predates = raw
+        .as_deref()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok())
+        .map(|v| v.get("opencode_notch_fixed").is_none())
+        .unwrap_or(false);
+    if !predates {
+        return;
+    }
+    if !cfg.notch_slots.is_empty() && !cfg.notch_slots.iter().any(|s| s.provider == "opencode") {
+        cfg.notch_slots.push(TraySlot { provider: "opencode".into() });
+    }
+    cfg.opencode_notch_fixed = true;
+}
+
+fn migrate_copilot_notch(cfg: &mut Config, raw: &Option<String>) {
+    let predates = raw
+        .as_deref()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok())
+        .map(|v| v.get("copilot_notch_fixed").is_none())
+        .unwrap_or(false);
+    if !predates {
+        return;
+    }
+    if !cfg.notch_slots.is_empty() && !cfg.notch_slots.iter().any(|s| s.provider == "copilot") {
+        cfg.notch_slots.push(TraySlot { provider: "copilot".into() });
+    }
+    cfg.copilot_notch_fixed = true;
+}
+
 pub fn save(cfg: &Config) {
     let path = config_path();
     if let Some(dir) = path.parent() {
@@ -303,8 +422,25 @@ pub fn save(cfg: &Config) {
 #[cfg(test)]
 mod tests {
     use super::{
-        carry_shared_position, keep_open_on_upgrade, snap_scale, theme_or_system, weekly_ring_or_off, Config,
+        carry_shared_position, clamp_critical_limit, clamp_watch_limit, color_transition_or_step,
+        keep_open_on_upgrade, snap_scale, theme_or_system, weekly_ring_or_off, Config,
     };
+
+    #[test]
+    fn reset_switches_default_on_and_round_trip_without_changing_other_settings() {
+        let old: Config = serde_json::from_str(r#"{"notch_visible":false,"theme":"light"}"#).unwrap();
+        assert!(old.reset_notifications);
+        assert!(old.reset_notification_sound);
+        assert!(!old.notch_visible);
+        assert_eq!(old.theme, "light");
+        let chosen = Config { reset_notifications: false, reset_notification_sound: false, ..old };
+        let saved = serde_json::to_string(&chosen).unwrap();
+        let restored: Config = serde_json::from_str(&saved).unwrap();
+        assert!(!restored.reset_notifications);
+        assert!(!restored.reset_notification_sound);
+        assert!(!restored.notch_visible);
+        assert_eq!(restored.theme, "light");
+    }
 
     /// Show on hover is the Mac's default, so a fresh install gets it — but an update must not start
     /// folding a notch whose owner has only ever known it open.
@@ -378,9 +514,62 @@ mod tests {
         assert_eq!(weekly_ring_or_off("outside"), "outside");
         assert_eq!(weekly_ring_or_off("Inside"), "off");
         assert_eq!(weekly_ring_or_off(""), "off");
+        assert_eq!(color_transition_or_step("ramp"), "ramp");
+        assert_eq!(color_transition_or_step("Ramp"), "hard_step");
+        assert_eq!(color_transition_or_step(""), "hard_step");
         assert_eq!(theme_or_system("light"), "light");
         assert_eq!(theme_or_system("dark"), "dark");
         assert_eq!(theme_or_system("Dark"), "system");
         assert_eq!(theme_or_system(""), "system");
+    }
+
+    #[test]
+    fn watch_and_critical_limits_never_cross() {
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        assert_eq!(clamp_watch_limit(0.5, 0.7), 0.5, "inside the gap, untouched");
+        assert!(near(clamp_watch_limit(0.9, 0.7), 0.69), "pushed back below critical");
+        assert_eq!(clamp_watch_limit(0.0, 0.7), 0.01, "never below the floor");
+        assert_eq!(clamp_watch_limit(0.5, 0.0), 0.01, "a critical of 0 still leaves a floor");
+
+        assert_eq!(clamp_critical_limit(0.7, 0.5), 0.7, "inside the gap, untouched");
+        assert!(near(clamp_critical_limit(0.4, 0.5), 0.51), "pushed back above watch");
+        assert_eq!(clamp_critical_limit(2.0, 0.5), 1.0, "never past 100%");
+        assert_eq!(clamp_critical_limit(0.7, 1.0), 1.0, "a watch of 100% still leaves a ceiling");
+    }
+
+    #[test]
+    fn theme_preserves_the_rest_of_a_config_when_it_is_missing_or_malformed() {
+        let old: Config = serde_json::from_str(r#"{"notch_visible":false}"#).unwrap();
+        assert_eq!(old.theme, "system", "an existing config follows Windows");
+        assert!(!old.notch_visible, "the existing choice survives");
+
+        for (raw, expected) in [
+            (r#""light""#, "light"),
+            (r#""dark""#, "dark"),
+            (r#""Light""#, "system"),
+            ("true", "system"),
+            ("[]", "system"),
+            ("{}", "system"),
+            ("null", "system"),
+        ] {
+            let cfg: Config =
+                serde_json::from_str(&format!(r#"{{"theme":{raw},"notch_visible":false}}"#))
+                    .unwrap();
+            assert_eq!(cfg.theme, expected, "{raw} resolves safely");
+            assert!(
+                !cfg.notch_visible,
+                "{raw} did not discard the rest of the config"
+            );
+        }
+
+        let saved = serde_json::to_value(Config {
+            theme: "light".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            saved.get("theme").and_then(|value| value.as_str()),
+            Some("light")
+        );
     }
 }

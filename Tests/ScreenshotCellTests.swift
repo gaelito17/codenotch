@@ -68,8 +68,9 @@ final class ScreenshotCellTests: XCTestCase {
 
     func testTheShapeShrinksByTheTuck() {
         let m = model(clipboard: true)
-        let untucked = NotchLayout.shapeLength(cellCount: m.cellCount, edge: m.edge, flare: m.flare,
-                                               spacing: m.cellSpacing) + 2 * m.endSpread
+        let untucked = NotchLayout.bodyLength(cellCount: m.cellCount, edge: m.edge,
+                                              spacing: m.cellSpacing)
+            + m.leadAllowance + m.endAllowance
         XCTAssertEqual(m.shapeLength, untucked - m.screenshotTuck, accuracy: 0.001)
     }
 
@@ -114,7 +115,7 @@ final class ScreenshotCellTests: XCTestCase {
         for edge in NotchEdge.allCases {
             let m = model(edge: edge, clipboard: true)
             guard let rep = render(m) else { XCTFail("\(edge): no image"); continue }
-            let centre = m.slack + m.ringCenter(index: m.screenshotIndex!) * m.sizeScale
+            let centre = m.ringAlong(index: m.screenshotIndex!, in: m.cellWing)
             let glyph = NotchLayout.glyphSize * m.sizeScale / 2
             XCTAssertGreaterThan(brightPixels(in: rep, model: m, centre: centre, half: glyph), 10,
                                  "\(edge): nothing drawn at the screenshot cell's centre")
@@ -152,7 +153,7 @@ final class ScreenshotCellTests: XCTestCase {
         controller.onTakeScreenshot = { finish = $0 }
 
         let place = NotchPlacement(edge: m.edge, panelSize: frame.size)
-        let along = m.slack + m.ringCenter(index: m.screenshotIndex!) * m.sizeScale
+        let along = m.ringAlong(index: m.screenshotIndex!, in: m.cellWing)
         XCTAssertEqual(controller.cellIndex(along: along), m.screenshotIndex)
         // Bands overlap where the pair is tucked together; each ring still
         // answers for its own half of the way between them.

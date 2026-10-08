@@ -97,7 +97,7 @@ final class ClipboardCellTests: XCTestCase {
     /// the cell has no reading text, so an empty band counts none.
     private func brightPixels(in rep: NSBitmapImageRep, model m: NotchViewModel, index: Int) -> Int {
         let place = NotchPlacement(edge: m.edge, panelSize: m.panelSize)
-        let centre = m.slack + m.ringCenter(index: index) * m.sizeScale
+        let centre = m.ringAlong(index: index, in: m.cellWing)
         let half = NotchLayout.glyphSize * m.sizeScale / 2
         var bright = 0
         for x in 0..<rep.pixelsWide {
@@ -149,7 +149,7 @@ final class ClipboardCellTests: XCTestCase {
 
         let place = NotchPlacement(edge: m.edge, panelSize: frame.size)
         func click(cell index: Int) {
-            let along = m.slack + m.ringCenter(index: index) * m.sizeScale
+            let along = m.ringAlong(index: index, in: m.cellWing)
             let local = place.point(along: along, across: m.notchDrawnDepth / 2)
             XCTAssertEqual(controller.cellIndex(along: along), index)
             controller.handleClick(at: CGPoint(x: local.x, y: frame.height - local.y))

@@ -26,7 +26,7 @@ extension View {
 /// crossing-and-notification machinery it switches is Notifications' to
 /// explain.
 private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
-    case accounts, phone, deepseek, ollama, lmstudio, customEndpoints, appearance, clipboard, screenshot, notifications, general
+    case accounts, phone, deepseek, ollama, lmstudio, customEndpoints, appearance, clipboard, screenshot, notifications, costs, general
 
     /// The sections the sidebar lists; Phone only once pairing is offered.
     static var visible: [SettingsSection] {
@@ -57,6 +57,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .clipboard:     return L10n.t("Clipboard")
         case .screenshot:    return L10n.t("Screenshot")
         case .notifications: return L10n.t("Notifications")
+        case .costs:         return L10n.t("Costs")
         case .general:       return L10n.t("General")
         }
     }
@@ -85,6 +86,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .clipboard:     return L10n.t("A history of what you copy, one click from the notch.")
         case .screenshot:    return L10n.t("A screenshot, one click from the notch.")
         case .notifications: return L10n.t("What Codenotch tells you, and when.")
+        case .costs:         return L10n.t("What each project spent of each login's allowance.")
         case .general:       return L10n.t("Startup, updates and everything else.")
         }
     }
@@ -101,6 +103,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .clipboard:     return "list.clipboard.fill"
         case .screenshot:    return "camera.viewfinder"
         case .notifications: return "bell.badge.fill"
+        case .costs:         return "banknote.fill"
         case .general:       return "gearshape.fill"
         }
     }
@@ -120,6 +123,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .clipboard:     return .brown
         case .screenshot:    return .teal
         case .notifications: return .red
+        case .costs:         return .mint
         case .general:       return .gray
         }
     }
@@ -184,6 +188,8 @@ private struct SettingsSidebarRow: View {
     let selectionSpace: Namespace.ID
     var indent = false
     var count: Int? = nil
+    /// A red dot — a newer version waiting, on General.
+    var badge: Bool = false
     var disclosure: Binding<Bool>? = nil
     let select: () -> Void
 
@@ -197,22 +203,40 @@ private struct SettingsSidebarRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            icon
-                .frame(width: 18)
-                .foregroundStyle(.white.opacity(isSelected ? 0.95 : isHovered ? 0.85 : 0.6))
-                // Leans toward the pointer's row a hair, and pops once on selection.
-                .offset(x: isHovered && !isSelected && !reduceMotion ? 1.5 : 0)
-            Text(section.title)
-                .font(.system(size: 13, weight: isSelected ? .medium : .regular))
-                .foregroundStyle(.white.opacity(isSelected ? 0.95 : isHovered ? 0.92 : 0.78))
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            if let count {
-                Text("\(count)")
-                    .font(.system(size: 11, weight: .medium).monospacedDigit())
-                    .foregroundStyle(.white.opacity(isHovered || isSelected ? 0.55 : 0.42))
-                    .contentTransition(.numericText())
+            HStack(spacing: 10) {
+                icon
+                    .frame(width: 18)
+                    .foregroundStyle(.white.opacity(isSelected ? 0.95 : isHovered ? 0.85 : 0.6))
+                    // Leans toward the pointer's row a hair, and pops once on selection.
+                    .offset(x: isHovered && !isSelected && !reduceMotion ? 1.5 : 0)
+                Text(section.title)
+                    .font(.system(size: 13, weight: isSelected ? .medium : .regular))
+                    .foregroundStyle(.white.opacity(isSelected ? 0.95 : isHovered ? 0.92 : 0.78))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                // A newer version waiting — see `Updater.pending`.
+                if badge {
+                    Circle()
+                        .fill(Color(nsColor: .systemRed))
+                        .frame(width: 7, height: 7)
+                        .transition(.scale.combined(with: .opacity))
+                }
+                if let count {
+                    Text("\(count)")
+                        .font(.system(size: 11, weight: .medium).monospacedDigit())
+                        .foregroundStyle(.white.opacity(isHovered || isSelected ? 0.55 : 0.42))
+                        .contentTransition(.numericText())
+                }
             }
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in if !isPressed { isPressed = true } }
+                    .onEnded { value in
+                        isPressed = false
+                        if abs(value.translation.width) < 6, abs(value.translation.height) < 6 { activate() }
+                    }
+            )
             if let disclosure {
                 DisclosureChevron(isExpanded: disclosure)
             }
@@ -240,28 +264,30 @@ private struct SettingsSidebarRow: View {
                 }
             }
         }
-        .contentShape(Self.pill)
         .scaleEffect(isPressed && !reduceMotion ? 0.97 : 1)
         .animation(.spring(response: 0.22, dampingFraction: 0.6), value: isPressed)
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.14)) { isHovered = hovering }
         }
-        // Pressed on touch-down, released on lift: the row answers the finger,
-        // not only the click.
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in if !isPressed { isPressed = true } }
-                .onEnded { value in
-                    isPressed = false
-                    if abs(value.translation.width) < 6, abs(value.translation.height) < 6 { select() }
-                }
-        )
         .onChange(of: isSelected) { selected in
             if selected { bounce += 1 }
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityAction { select() }
+        .accessibilityAction { activate() }
+    }
+
+    /// Selecting Accounts should not also change its disclosure state. Once
+    /// Accounts is already selected, the row remains a convenient larger
+    /// target for folding its provider panes; the chevron stays an independent
+    /// control in either state.
+    private func activate() {
+        if let disclosure, isSelected {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.75)) {
+                disclosure.wrappedValue.toggle()
+            }
+        }
+        select()
     }
 
     @ViewBuilder
@@ -415,6 +441,15 @@ struct SettingsView: View {
     /// already be centred, in which case the action has no visible movement;
     /// the acknowledgement keeps the button from feeling inert.
     @State private var didRecentre = false
+
+    /// Whether this Mac draws the notch as its own cutout — the one placement
+    /// where the hardware sets the size outright, and so the only one where the
+    /// reading under a ring is paid for out of the ring.
+    private var sizeIsDecidedByTheHardware: Bool {
+        preferences.notchEdge == .top
+            && NSScreen.screens.contains { $0.hardwareNotch != nil }
+    }
+
     /// Switching off has to reach the store's archive, not just the preference
     /// — see `UsageStore.signOut(providerID:)`.
     let signOut: (String) -> Void
@@ -439,6 +474,7 @@ struct SettingsView: View {
     var previewResetAlert: (() -> Void)? = nil
     var previewSessionLimitAlert: (() -> Void)? = nil
     var previewWeeklyLimitAlert: (() -> Void)? = nil
+    var sendTestNotification: (() -> Void)? = nil
     @Environment(\.codenotchReduceTransparency) private var reduceTransparency
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -576,6 +612,7 @@ struct SettingsView: View {
                             isSelected: selection == section,
                             selectionSpace: selectionSpace,
                             count: section == .accounts ? connectedCount : nil,
+                            badge: section == .general && updater.pending != nil,
                             disclosure: section == .accounts ? $accountsExpanded : nil,
                             select: { selectSection(section) }
                         )
@@ -606,8 +643,8 @@ struct SettingsView: View {
                     // Only once a check has found a newer version. Sparkle
                     // downloads it in the background either way; this is for
                     // someone who would rather have it now than on next launch.
-                    if case .found(let newer) = updater.outcome {
-                        Button(L10n.t("Update")) { updater.checkNow() }
+                    if let newer = updater.pending {
+                        Button(L10n.t("Update")) { updater.reoffer() }
                             .buttonStyle(SettingsButtonStyle(kind: .prominent, compact: true))
                             .help(L10n.t("Version \(newer) is available"))
                             .transition(.opacity.combined(with: .scale(scale: 0.9)))
@@ -679,6 +716,7 @@ struct SettingsView: View {
         switch section {
         case .accounts:      accountsPane
         case .phone:         phonePane
+        case .costs:         CostSettingsPane()
         case .deepseek:      DeepSeekPricingSettingsView(preferences: preferences)
         case .ollama:
             if let usageStore {
@@ -808,7 +846,7 @@ struct SettingsView: View {
                 Toggle(L10n.t("Show Spark and code review"), isOn: $preferences.showCodexExtraLimits)
                     .onChange(of: preferences.showCodexExtraLimits) { _ in
                         for account in providers() where CodexProfile.isCodex(providerID: account.id) {
-                            usageStore?.refresh(providerID: account.id)
+                            usageStore?.refresh(providerID: account.id, freshness: .fromSource)
                         }
                     }
                 Text(L10n.t("The ring still follows the main Codex window. Spark and code review stay in the hover card."))
@@ -826,9 +864,25 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
+                Toggle(L10n.t("Percentage under each ring"),
+                       isOn: $preferences.showsNotchReadings)
+                Text(sizeIsDecidedByTheHardware
+                     ? L10n.t("Merged into your Mac's own notch the bar is exactly as deep as the cutout, so a ring and a percentage under it have to share that depth — showing it draws the rings smaller. Turn it off for the largest rings the cutout has room for.")
+                     : L10n.t("The figure under each ring. Turn it off for rings alone; the number is still a hover away in the card."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 if preferences.weeklyRing != .off {
                     Toggle(L10n.t("Dashed weekly ring"), isOn: $preferences.weeklyRingDashed)
+                    Toggle(L10n.t("Weekly ring % in the reading"), isOn: $preferences.weeklyReading)
                 }
+
+                Toggle(L10n.t("Weekly limit as the main ring"), isOn: $preferences.weeklyHeadline)
+                Text(L10n.t("For every provider with a weekly limit beside a shorter one, the main ring shows the week. The shorter window moves to the thin ring and the card. Alerts, the menu bar and providers with no weekly limit are unchanged, and Claude's daily pace ring still leads when it is on."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Toggle(L10n.t("Claude daily pace ring"), isOn: $preferences.claudeDailyPaceRing)
                 Text(L10n.t("Claude's main ring shows today's share of the weekly limit — a seventh a day, counted from the weekly reset — instead of the session. The session moves to the thin ring and the card; alerts follow the daily ring."))
@@ -881,6 +935,20 @@ struct SettingsView: View {
                 // different people: three named sizes for anyone who wants a
                 // decision made for them, and a slider for anyone who has a
                 // particular size in mind and will not be talked out of it.
+                //
+                // Both are still shown on the hardware edge, where neither of
+                // them does anything: the cutout sets the size there, whatever
+                // is chosen here. Hiding them would put the value that governs
+                // every *other* edge out of reach from the one place it is
+                // configured — so they stay, and the note below says why the
+                // notch is not moving.
+                if sizeIsDecidedByTheHardware {
+                    Text(L10n.t("On this edge your notch is merged into your Mac's own cutout, and the cutout sets its size. This has no effect here — it is waiting for you to move the notch to another edge."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 Picker(L10n.t("Size"), selection: Binding(
                     get: { preferences.usesCustomNotchScale },
                     set: { preferences.usesCustomNotchScale = $0 }
@@ -954,14 +1022,6 @@ struct SettingsView: View {
                     .buttonStyle(SettingsButtonStyle(kind: .prominent))
                 }
 
-                // The arc above the notch. Hiding it loses nothing that cannot
-                // be reached another way: Edge, above, moves the notch too.
-                Toggle(L10n.t("Show move handle"), isOn: $preferences.showsMoveHandle)
-                Text(L10n.t("The arc above the notch. Hold it to carry the notch to another edge — Edge above does the same."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
                 Picker(L10n.t("Displays"), selection: $preferences.notchScope) {
                     ForEach(NotchScreenScope.allCases) { Text($0.title).tag($0) }
                 }
@@ -996,6 +1056,19 @@ struct SettingsView: View {
 
             Section(L10n.t("Usage Limits")) {
                 VStack(alignment: .leading, spacing: 4) {
+                    Picker(L10n.t("Colour transition"), selection: $preferences.colorTransitionStyle) {
+                        ForEach(ColorTransitionStyle.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Text(preferences.colorTransitionStyle.explanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.bottom, 4)
+
+                VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text(L10n.t("Watch limit"))
                         Spacer()
@@ -1010,6 +1083,15 @@ struct SettingsView: View {
                         Text("\(Int(preferences.criticalLimit * 100))%")
                     }
                     Slider(value: $preferences.criticalLimit, in: 0.01...1.00)
+
+                    // The ramp's own red anchor is 100%, not this slider — said here rather
+                    // than left for the user to notice by moving it and seeing nothing change.
+                    if preferences.colorTransitionStyle == .ramp {
+                        Text(L10n.t("With the colour ramp on, this still marks critical elsewhere in the app, but the ring's own red only arrives at 100%."))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 Button(L10n.t("Reset to defaults")) {
                     // Critical first: `watchLimit` clamps itself below critical,
@@ -1134,6 +1216,32 @@ struct SettingsView: View {
 
     private var notificationsPane: some View {
         Form {
+            // First, because it changes what every switch below does. One
+            // choice for all of them: the reasons for a banner (a second
+            // display, a hidden notch) or for the notch (nothing in
+            // Notification Center) hold for every event at once.
+            Section(L10n.t("Where to notify")) {
+                Picker(L10n.t("Channel"), selection: $preferences.notificationChannel) {
+                    ForEach(NotificationChannel.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+
+                Text(preferences.notificationChannel.explanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let sendTestNotification {
+                    Button(L10n.t("Send a test")) { sendTestNotification() }
+                    Text(preferences.notificationChannel == .mac
+                         ? L10n.t("Opens System Settings when banners are off for Codenotch.")
+                         : L10n.t("The notch opens for a moment, with the session sound."))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             // Its own section rather than a line in General: this is the only
             // part of the app that speaks first, and a switch that stops the
             // Mac making a noise has to be findable by someone who is looking
@@ -1252,7 +1360,7 @@ struct SettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Toggle(L10n.t("Install updates automatically"), isOn: Binding(
+                Toggle(L10n.t("Check for updates automatically"), isOn: Binding(
                     get: { updater.automatic },
                     set: { updater.automatic = $0 }
                 ))
@@ -1264,11 +1372,16 @@ struct SettingsView: View {
                     // a way to switch it off, is the difference between a
                     // background updater and something that looks like it is
                     // hiding.
-                    Text(L10n.t("Version \(updater.currentVersion). Updates install in the background and apply next time Codenotch starts."))
+                    Text(L10n.t("Version \(updater.currentVersion). New versions are offered in the notch, and install when you choose Update."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 0)
+                    // The card a new version brings up in the notch, played
+                    // through for a version that is not there.
+                    Button(L10n.t("Preview")) { updater.preview() }
+                        .controlSize(.small)
+                        .help(L10n.t("Show the update card in the notch, with nothing downloaded"))
                     Button(L10n.t("Check now")) { updater.checkNow() }
                         .controlSize(.small)
                 }
@@ -1285,6 +1398,19 @@ struct SettingsView: View {
                         )
                         .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+
+            Section(L10n.t("Readings")) {
+                Toggle(L10n.t("Ask the provider every time you look"),
+                       isOn: $preferences.asksProviderOnLook)
+                Text(L10n.t("Pointing at a ring, or opening the menu bar menu, re-reads the limit from the provider itself rather than from a reading cached moments ago. Off, a look still asks for a live reading and accepts a cached one only while it is newer than a couple of minutes."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(L10n.t("It spends a request every time. A provider that rate-limits answers one request too many by refusing the next few minutes of them, and the figure then ages further than it would have. Worth turning on to check Codenotch against a provider's own dashboard, and worth turning off again after."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             // An ordinary row here, not a bar pinned across every pane —
@@ -1399,7 +1525,7 @@ struct SettingsView: View {
     /// this, sees four blank rings and concludes it is broken — and the
     /// distinction that catches them out is Claude *Code*, not the Claude app.
     static var setupCopy: String {
-        L10n.t("Codenotch reads usage from tools already signed in on this Mac — it never asks for your password. Install and sign in to any of Claude Code (the terminal tool, not the Claude app), Cursor (the editor or cursor-agent), Codex, Antigravity, GLM, Grok, OpenCode, Command Code, GitHub Copilot, Kimi Code, Kiro, Amp or a Gemini API key (via Gemini CLI, OpenCode or Hermes), and its ring appears in the notch.")
+        L10n.t("Codenotch reads usage from tools already signed in on this Mac — it never asks for your password. Install and sign in to any of Claude Code (the terminal tool, not the Claude app), Cursor (the editor or cursor-agent), Codex, Antigravity, GLM, Grok, OpenCode, Command Code, GitHub Copilot, Kimi Code, Kiro, Amp, Apify, the Kilo CLI or a Gemini API key (via Gemini CLI, OpenCode or Hermes), and its ring appears in the notch.")
     }
 
     /// Said before it happens rather than after. A system dialogue asking to
@@ -1975,8 +2101,30 @@ private struct AccountRow: View {
             // MiniMax is signed into in Codenotch, or by a Coding Plan key
             // pasted here. The region is which console that key belongs to.
             // Stored in the keychain on Save, the same way Ollama's is.
+            if provider.id == "qoder" {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(L10n.t("Region")).foregroundStyle(.secondary)
+                    Picker(selection: $preferences.qoderRegion) {
+                        Text(L10n.t("International")).tag(Sites.QoderRegion.global)
+                        Text(L10n.t("China mainland")).tag(Sites.QoderRegion.china)
+                    } label: { EmptyView() }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 160)
+                    Text(L10n.t("Sign in to Qoder in Codenotch. Each region has a separate account and session. Website verification may be required."))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             if provider.id == "minimax" {
                 minimaxEntry
+            }
+
+            // Apify borrows the CLI's login when there is one; the token
+            // pasted here is for a Mac without it. Stored in the keychain on
+            // Save, the same way Ollama's is.
+            if provider.id == "apify" {
+                apifyTokenEntry
             }
         }
     }
@@ -2015,6 +2163,43 @@ private struct AccountRow: View {
                         .foregroundStyle(.green)
                 }
             }
+        }
+        .padding(.top, 2)
+    }
+
+    /// The API token input for Apify. Stored in the keychain on Save, then a
+    /// refresh is triggered so the ring picks up the new credential without a
+    /// relaunch — the same shape as Ollama's key above, and for the same
+    /// reason the caption sits on its own line.
+    @State private var apifyToken = ""
+    @State private var apifyTokenSaved = false
+
+    private var apifyTokenEntry: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(L10n.t("Apify API token"))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                SecureField(L10n.t("Paste your key"), text: $apifyToken)
+                    .textContentType(.password)
+                    .textFieldStyle(.roundedBorder)
+                    .labelsHidden()
+                    .frame(maxWidth: 260)
+                Button(L10n.t("Save")) {
+                    guard !apifyToken.isEmpty else { return }
+                    ApifyCredentials.storeSettingsToken(apifyToken)
+                    apifyToken = ""
+                    apifyTokenSaved = true
+                    _ = signIn(provider.id)
+                }
+                .disabled(apifyToken.isEmpty)
+                if apifyTokenSaved {
+                    Text(L10n.t("Saved"))
+                        .foregroundStyle(.green)
+                }
+            }
+            Text(L10n.t("Paste a token from Apify Console › Settings › API & Integrations. Not needed after apify login, or with APIFY_TOKEN exported. Stored in your login keychain."))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.top, 2)
     }
@@ -2211,6 +2396,10 @@ private struct AccountRow: View {
             return NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil
         case .guidance:
             return false
+        case .command:
+            // Installed or not, the button does something: it runs the login
+            // or opens the install page.
+            return true
         }
     }
 
