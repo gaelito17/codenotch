@@ -10,5 +10,5 @@ xcuserdata/
 .agents/
 .forgeguard/
 .playwright-mcp/
-plans/
+/plans/
 .atlas/

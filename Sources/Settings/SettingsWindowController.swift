@@ -24,6 +24,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let ollamaRelay: OllamaActivityRelay?
     private let lmstudioMetrics: LMStudioMetrics?
     private let clipboard: ClipboardService?
+    private let omlxMetrics: OMLXMetrics?
     private let usageStore: UsageStore?
     let phoneLinkPairing: PhoneLinkPairing?
     let phoneLinkRegistry: PhoneLinkRegistry?
@@ -50,10 +51,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
          sendTestNotification: (() -> Void)? = nil,
          usageStore: UsageStore? = nil,
          ollamaRelay: OllamaActivityRelay? = nil,
-         lmstudioMetrics: LMStudioMetrics? = nil,
+         lmstudioMetrics: LMStudioMetrics? = nil, omlxMetrics: OMLXMetrics? = nil,
          clipboard: ClipboardService? = nil, phoneLinkPairing: PhoneLinkPairing? = nil, phoneLinkRegistry: PhoneLinkRegistry? = nil, phoneLinkServerStatus: PhoneLinkServerStatus? = nil) {
         self.ollamaRelay = ollamaRelay
         self.lmstudioMetrics = lmstudioMetrics
+        self.omlxMetrics = omlxMetrics
         self.clipboard = clipboard
         self.usageStore = usageStore
         self.phoneLinkPairing = phoneLinkPairing
@@ -271,6 +273,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                                    quit: quit,
                                    updater: updater,
                                    ollamaRelay: ollamaRelay, lmstudioMetrics: lmstudioMetrics,
+                                   omlxMetrics: omlxMetrics,
                                    usageStore: usageStore, clipboard: clipboard,
                                    previewResetAlert: previewResetAlert,
                                    previewSessionLimitAlert: previewSessionLimitAlert,
