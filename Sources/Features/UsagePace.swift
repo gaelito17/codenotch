@@ -2,9 +2,20 @@ import Foundation
 
 struct UsagePace {
     /// Used quota minus elapsed time, expressed in percentage points.
+    ///
+    /// Positive is a deficit (burning too fast, runs out early); negative is
+    /// held in reserve. `burnPoints` flips the sign, so the reserve that is
+    /// about to expire unused reads positive for the burn-deficit sort.
     let percentagePoints: Double
 
     var isDeficit: Bool { percentagePoints > 0 }
+
+    /// The waste risk, in points: remaining quota minus remaining time.
+    /// Positive is urgent (much left, little time), negative means ahead
+    /// of burn (in deficit). Nil pace has no burn figure.
+    var burnPoints: Double { -percentagePoints }
+
+    var isBurnUrgent: Bool { burnPoints > 0 }
 
     var summary: String {
         let magnitude = abs(percentagePoints)
@@ -49,6 +60,26 @@ extension LimitWindow {
         return UsagePace(
             percentagePoints: (spentFraction - elapsedFraction) * 100
         )
+    }
+
+    /// The burn deficit for this window, in points: remaining quota minus
+    /// remaining time. Positive means quota will expire unused unless burn
+    /// accelerates (the 70%-left-with-23h-left case). Nil exactly when
+    /// there is no cycle to measure against — the same windows pace skips.
+    func burnDeficitPoints(now: Date) -> Double? {
+        usagePace(now: now).map(\.burnPoints)
+    }
+}
+
+extension ProviderSnapshot {
+    /// The most urgent burn deficit across every timed window, in points.
+    ///
+    /// The max, not the headline: a weekly allowance expiring in 23h is
+    /// urgent even where the 5-hour session beside it is comfortable, and
+    /// sorting by the headline alone would bury it. Nil when no window
+    /// carries a clock — nothing timed, nothing to burn down.
+    func maxBurnDeficit(now: Date) -> Double? {
+        windows.compactMap { $0.burnDeficitPoints(now: now) }.max()
     }
 }
 

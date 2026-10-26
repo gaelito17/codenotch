@@ -350,16 +350,15 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(shutRingsWhenSpent, forKey: Keys.shutRingsWhenSpent) }
     }
 
-    /// Whether the notch sorts rings by what is left instead of the manual
-    /// order: most remaining first, by the window that leads each ring. A
-    /// high number that cannot be spent yet sinks below usable accounts but
-    /// stays above empty ones; the Accounts list keeps the manual order,
-    /// which breaks ties.
+    /// In what order the notch draws its rings: the manual arrangement
+    /// dragging built, most remaining first, or quota expiring soonest
+    /// first. See `RingOrder` for why it is one choice rather than two
+    /// switches.
     ///
-    /// Off by default: the manual arrangement is what dragging built, and
-    /// re-sorting unasked would strand it.
-    @Published var autoOrderByRemaining: Bool {
-        didSet { defaults.set(autoOrderByRemaining, forKey: Keys.autoOrderByRemaining) }
+    /// Manual by default: the manual arrangement is what dragging built,
+    /// and re-sorting unasked would strand it.
+    @Published var ringOrder: RingOrder {
+        didSet { defaults.set(ringOrder.rawValue, forKey: Keys.ringOrder) }
     }
 
     /// Whether accounts with nothing left to spend leave the notch: the
@@ -459,6 +458,28 @@ final class Preferences: ObservableObject {
         didSet { defaults.set(showsWeeklyLimitInMenuBar, forKey: Keys.showsWeeklyLimitInMenuBar) }
     }
 
+    /// What a plain click on the item does. `.menu` is what it has always
+    /// done, and the menu stays a right-click away whatever is chosen: with
+    /// the app out of the Dock the menu is the only way to Settings and Quit.
+    @Published var menuBarClickAction: MenuBarClickAction {
+        didSet { defaults.set(menuBarClickAction.rawValue, forKey: Keys.menuBarClickAction) }
+    }
+
+    /// How much of each reading the item prints. `.automatic` is the rule it
+    /// has always followed — two readings with countdowns, shares alone past
+    /// that — now answerable by whoever has to live with the width.
+    @Published var menuBarReading: MenuBarReading {
+        didSet { defaults.set(menuBarReading.rawValue, forKey: Keys.menuBarReading) }
+    }
+
+    /// How the item shows that an agent is working. `.pulse` is what it has
+    /// always done, so an upgrade changes nothing; the other two exist because
+    /// movement in the menu bar is not everyone's idea of an indicator, and
+    /// stopping it used to mean turning Reduce Motion on for the whole Mac.
+    @Published var menuBarActivityStyle: MenuBarActivityStyle {
+        didSet { defaults.set(menuBarActivityStyle.rawValue, forKey: Keys.menuBarActivityStyle) }
+    }
+
     /// The providers the menu bar summarises when it does, as ids. Nil until
     /// the first choice — see `MenuBarLimits` for what that reads as. From
     /// then on it is the ones that are on, so a provider that turns up later
@@ -480,6 +501,36 @@ final class Preferences: ObservableObject {
     /// Both halves of the menu bar choice, the way the status item takes them.
     var menuBarLimits: MenuBarLimits {
         MenuBarLimits(isOn: showsLimitsInMenuBar, chosen: menuBarProviders)
+    }
+
+    /// The providers whose card in the menu is opened out, as ids.
+    ///
+    /// Closed is the base state, and closed is not nothing: the card still
+    /// carries what the limits say — the windows, their bars, the percentages,
+    /// the resets, and a block if there is one. What the switch adds is
+    /// everything the notch's tooltip carries besides: the live sessions, a
+    /// local model's readings, Codex's unused resets and account activity,
+    /// DeepSeek's usage breakdown.
+    ///
+    /// Presentation only, and per provider. Nothing here decides what is read
+    /// or how often — the same distinction `menuBarProviders` keeps.
+    @Published private(set) var expandedDetailProviders: Set<String> {
+        didSet {
+            guard expandedDetailProviders != oldValue else { return }
+            defaults.set(expandedDetailProviders.sorted(), forKey: Keys.expandedDetailProviders)
+        }
+    }
+
+    func isDetailExpanded(_ providerID: String) -> Bool {
+        expandedDetailProviders.contains(providerID)
+    }
+
+    func setDetailExpanded(_ expanded: Bool, for providerID: String) {
+        if expanded {
+            expandedDetailProviders.insert(providerID)
+        } else {
+            expandedDetailProviders.remove(providerID)
+        }
     }
 
     /// Open the notch for a few seconds when an agent stops working.
@@ -637,7 +688,11 @@ final class Preferences: ObservableObject {
         static let notificationChannel = "notificationChannel"
         static let showsLimitsInMenuBar = "showsLimitsInMenuBar"
         static let showsWeeklyLimitInMenuBar = "showsWeeklyLimitInMenuBar"
+        static let menuBarActivityStyle = "menuBarActivityStyle"
+        static let menuBarReading = "menuBarReading"
+        static let menuBarClickAction = "menuBarClickAction"
         static let menuBarProviders = "menuBarProviders"
+        static let expandedDetailProviders = "expandedDetailProviders"
         static let edge = "notchEdge"
         // A new key, so there is nothing under the old app name to migrate.
         static let size = "notchSize"
@@ -655,6 +710,8 @@ final class Preferences: ObservableObject {
         static let weeklyReading = "weeklyReading"
         static let shutRingsWhenSpent = "shutRingsWhenSpent"
         static let autoOrderByRemaining = "autoOrderByRemaining"
+        static let autoOrderByDeficit = "autoOrderByDeficit"
+        static let ringOrder = "ringOrder"
         static let hideDepletedAccounts = "hideDepletedAccounts"
         static let claudeDailyPaceRing = "claudeDailyPaceRing"
         static let weeklyHeadline = "weeklyHeadline"
@@ -978,8 +1035,17 @@ final class Preferences: ObservableObject {
         // Absent means an install from before this option, which must retain
         // its existing compact status-item presentation.
         self.showsWeeklyLimitInMenuBar = defaults.bool(forKey: Keys.showsWeeklyLimitInMenuBar)
+        self.menuBarActivityStyle = defaults.string(forKey: Keys.menuBarActivityStyle)
+            .flatMap(MenuBarActivityStyle.init(rawValue:)) ?? .pulse
+        self.menuBarReading = defaults.string(forKey: Keys.menuBarReading)
+            .flatMap(MenuBarReading.init(rawValue:)) ?? .automatic
+        self.menuBarClickAction = defaults.string(forKey: Keys.menuBarClickAction)
+            .flatMap(MenuBarClickAction.init(rawValue:)) ?? .menu
         // Absent is kept distinct from empty: never chosen is not choosing none.
         self.menuBarProviders = defaults.stringArray(forKey: Keys.menuBarProviders).map(Set.init)
+        self.expandedDetailProviders = Set(
+            defaults.stringArray(forKey: Keys.expandedDetailProviders) ?? []
+        )
         // The right edge is where the notch has always been, and it is the one
         // side of a Mac that no system chrome claims by default.
         self.notchEdge = defaults.string(forKey: Keys.edge)
@@ -1036,7 +1102,11 @@ final class Preferences: ObservableObject {
         // choice for whoever budgets from the other end.
         self.showsRemainingInNotch = defaults.bool(forKey: Self.showsRemainingInNotchKey)
         self.shutRingsWhenSpent = defaults.object(forKey: Keys.shutRingsWhenSpent) as? Bool ?? true
-        self.autoOrderByRemaining = defaults.bool(forKey: Keys.autoOrderByRemaining)
+        self.ringOrder = defaults.string(forKey: Keys.ringOrder).flatMap(RingOrder.init(rawValue:))
+            // Migrated once from the two switches, which could both be on —
+            // the deficit sort won then too, so it wins the migration.
+            ?? (defaults.bool(forKey: Keys.autoOrderByDeficit) ? .deficit
+                : defaults.bool(forKey: Keys.autoOrderByRemaining) ? .remaining : .manual)
         self.hideDepletedAccounts = defaults.bool(forKey: Keys.hideDepletedAccounts)
 
         self.weeklyRing = defaults.string(forKey: Keys.weeklyRing)

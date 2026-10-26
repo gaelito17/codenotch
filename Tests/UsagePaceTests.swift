@@ -113,6 +113,48 @@ final class UsagePacePreferenceTests: XCTestCase {
     }
 }
 
+final class BurnDeficitTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_800_000_000)
+    private let week: TimeInterval = 7 * 86400
+
+    private func window(used: Double, hoursLeft: Double) -> LimitWindow {
+        LimitWindow(id: "w", label: "Weekly", usedFraction: used,
+                    resetsAt: now.addingTimeInterval(hoursLeft * 3600), duration: week)
+    }
+
+    func testBurnIsRemainingMinusTimeLeft() throws {
+        // 70% left with 23h of a week left: ~56 to burn.
+        let urgent = try XCTUnwrap(window(used: 0.3, hoursLeft: 23).burnDeficitPoints(now: now))
+        XCTAssertEqual(urgent, 56.3095, accuracy: 0.01)
+        // 100% left with 6 days: ~14 to burn.
+        let fresh = try XCTUnwrap(window(used: 0.0, hoursLeft: 6 * 24).burnDeficitPoints(now: now))
+        XCTAssertEqual(fresh, 14.2857, accuracy: 0.0001)
+        XCTAssertGreaterThan(urgent, fresh)
+    }
+
+    func testMaxBurnTakesTheMostUrgentWindow() throws {
+        let session = LimitWindow(id: "session", label: "Session", usedFraction: 0.1,
+                                  resetsAt: now.addingTimeInterval(4 * 3600), duration: 5 * 3600)
+        let weekly = LimitWindow(id: "weekly_all", label: "Weekly", usedFraction: 0.3,
+                                 resetsAt: now.addingTimeInterval(23 * 3600), duration: week)
+        let snapshot = ProviderSnapshot(id: "p", displayName: "p", glyph: .claude,
+                                        fidelity: .official, status: .ok,
+                                        windows: [session, weekly],
+                                        headlineID: "session", weeklyID: "weekly_all")
+        let max = try XCTUnwrap(snapshot.maxBurnDeficit(now: now))
+        XCTAssertEqual(max, 56.3095, accuracy: 0.01)
+    }
+
+    func testNoClockMeansNoBurn() {
+        XCTAssertNil(LimitWindow(id: "w", label: "Weekly", usedFraction: 0.3).burnDeficitPoints(now: now))
+        let snapshot = ProviderSnapshot(id: "p", displayName: "p", glyph: .claude,
+                                        fidelity: .official, status: .ok,
+                                        windows: [LimitWindow(id: "w", label: "W", usedFraction: 0.3)],
+                                        headlineID: "w")
+        XCTAssertNil(snapshot.maxBurnDeficit(now: now))
+    }
+}
+
 final class PaceMarkerTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 

@@ -182,8 +182,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Log.usage.info("codex profiles: \(self.codexProfiles.map(\.displayPath).joined(separator: ", "), privacy: .public)")
             Log.usage.info("antigravity profiles: \(self.antigravityProfiles.map(\.displayPath).joined(separator: ", "), privacy: .public)")
             // Named together rather than one by one: a name derived from the
-            // signed-in address can collide with another profile's, and only a
-            // caller holding every profile can see that.
+            // signed-in address can collide with another profile's, and a lone
+            // profile needs no name beyond "Claude" — only a caller holding
+            // every profile can see either.
             let claudeNames = ClaudeProfile.displayNames(for: claudeProfiles)
             let claudeProviders = claudeProfiles.map {
                 ClaudeOAuthProvider(profile: $0, displayName: claudeNames[$0.id])
@@ -202,7 +203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 + [GLMProvider(), MiniMaxProvider(web: miniMaxWeb), GrokLocalProvider(), GrokBotProvider(), DevinLocalProvider(), OpenCodeProvider()]
                 + commandCodeProfiles.map { CommandCodeProvider(profile: $0) }
                 + [GitHubCopilotProvider(), KimiProvider(), KiroProvider(), AmpProvider(),
-                   ApifyProvider(), KiloProvider(),
+                   ApifyProvider(), KiloProvider(), HiggsfieldProvider(),
                    MuseLocalProvider(),
                    OllamaLocalProvider(endpoint: URL(string: preferences.ollamaEndpoint)!),
                    LMStudioLocalProvider(endpoint: URL(string: preferences.lmstudioEndpoint)!),
@@ -556,11 +557,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             let statusItem = StatusItemController { [weak settings] in settings?.show() }
             self.statusItem = statusItem
-            // Both are somebody's own click, so neither is answered from
-            // anything held: see `UsageFreshness.fromSource`.
-            statusItem.onRefreshProvider = { [weak store] id in
-                store?.refresh(providerID: id, freshness: .fromSource)
-            }
+            // The cards in the menu are drawn from the fleet's panel-less
+            // model — the very snapshots and Appearance settings the notches
+            // are handed. No provider is read to open the menu and no second
+            // store is kept: the menu is another reader of the one the notch
+            // already reads, which is what keeps the two from disagreeing.
+            statusItem.model = fleet.menuModel
+            // Somebody's own click, so it is not answered from anything held:
+            // see `UsageFreshness.fromSource`.
             statusItem.onRefreshAll = { [weak store] in store?.refreshNow(freshness: .fromSource) }
             statusItem.onLook = { [weak store] in store?.refreshBecauseSomeoneIsLooking() }
             // The menu's tick writes to the same preference Settings writes to,
@@ -568,6 +572,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // value to the item, and Settings — a published property away —
             // redraws its own switch from it in the same breath.
             statusItem.onToggleLimits = { [weak preferences] in preferences?.showsLimitsInMenuBar = $0 }
+            // A card's own switch, written back the same way: into Preferences,
+            // and read back through the sink below. The controller keeps no
+            // copy, so the switch and what the card draws cannot disagree.
+            statusItem.onToggleDetail = { [weak preferences] id, expanded in
+                preferences?.setDetailExpanded(expanded, for: id)
+            }
+            statusItem.expandedDetail = preferences.expandedDetailProviders
             // Read when the menu opens, so a model's line is as current as its cell.
             statusItem.cells = { [weak fleet] in fleet?.menuModel.snapshots ?? [] }
             statusItem.activity = { [weak fleet] in fleet?.menuModel.activity(for: $0) }
@@ -577,6 +588,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem.limits = preferences.menuBarLimits
             statusItem.resetTimeFormat = preferences.resetTimeFormat
             statusItem.showsWeeklyLimit = preferences.showsWeeklyLimitInMenuBar
+            statusItem.showsRemaining = preferences.showsRemainingInNotch
+            statusItem.hidesDepleted = preferences.hideDepletedAccounts
+            statusItem.clickAction = preferences.menuBarClickAction
+            statusItem.autoOrders = preferences.ringOrder == .remaining
+            statusItem.reading = preferences.menuBarReading
+            statusItem.activityStyle = preferences.menuBarActivityStyle
 
             preferences.$appPresence
                 .receive(on: RunLoop.main)
@@ -600,12 +617,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .sink { [weak statusItem] in statusItem?.limits = $0 }
                 .store(in: &cancellables)
 
+            // Dispatch, not the run loop, for the reason the limit switch
+            // above gives: this lands while AppKit is still tracking the menu
+            // the card is in, which is exactly when a card is opened.
+            preferences.$expandedDetailProviders
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak statusItem] in statusItem?.expandedDetail = $0 }
+                .store(in: &cancellables)
+
             // Presentation only, like the parent limit switch: redraw from the
             // current snapshots immediately and never start another fetch.
             preferences.$showsWeeklyLimitInMenuBar
                 .removeDuplicates()
                 .receive(on: DispatchQueue.main)
                 .sink { [weak statusItem] in statusItem?.showsWeeklyLimit = $0 }
+                .store(in: &cancellables)
+
+            // The notch's own two display choices, which the item's face now
+            // answers as well. Presentation only, like everything above: the
+            // same readings, read from the other end or one account shorter.
+            preferences.$showsRemainingInNotch
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak statusItem] in statusItem?.showsRemaining = $0 }
+                .store(in: &cancellables)
+
+            preferences.$hideDepletedAccounts
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak statusItem] in statusItem?.hidesDepleted = $0 }
+                .store(in: &cancellables)
+
+            preferences.$menuBarClickAction
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak statusItem] in statusItem?.clickAction = $0 }
+                .store(in: &cancellables)
+
+            preferences.$ringOrder
+                .map { $0 == .remaining }
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak statusItem] in statusItem?.autoOrders = $0 }
+                .store(in: &cancellables)
+
+            preferences.$menuBarReading
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak statusItem] in statusItem?.reading = $0 }
+                .store(in: &cancellables)
+
+            preferences.$menuBarActivityStyle
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak statusItem] in statusItem?.activityStyle = $0 }
                 .store(in: &cancellables)
 
             preferences.$notchVisibility
@@ -900,20 +966,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // publishers at most, and the snapshots plus the four display
             // choices are five.
             let displayOptions = preferences.$claudeDailyPaceRing.combineLatest(
-                preferences.$weeklyHeadline, preferences.$autoOrderByRemaining,
+                preferences.$weeklyHeadline, preferences.$ringOrder,
                 preferences.$hideDepletedAccounts)
             store.$notchSnapshots
                 .combineLatest(displayOptions)
                 .receive(on: RunLoop.main)
                 .sink { [weak fleet] snapshots, options in
-                    let (paced, weekly, autoOrder, hideDepleted) = options
+                    let (paced, weekly, order, hideDepleted) = options
                     // Before the derivations: the daily pace ring is advisory,
                     // not a spending gate, and judging off it would hide an
                     // account that overspent today's share while the session
                     // still has room.
                     let usable = hideDepleted ? snapshots.filter { !$0.isDepleted } : snapshots
                     var drawn = Self.drawn(usable, weekly: weekly, paced: paced)
-                    if autoOrder { drawn = ProviderOrder.byRemainingUsage(drawn) }
+                    switch order {
+                    case .deficit:   drawn = ProviderOrder.byBurnDeficit(drawn, now: Date())
+                    case .remaining: drawn = ProviderOrder.byRemainingUsage(drawn)
+                    case .manual:    break
+                    }
                     fleet?.setSnapshots(drawn)
                 }
                 .store(in: &cancellables)

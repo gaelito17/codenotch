@@ -14,15 +14,26 @@ mod tray;
 mod traymenu;
 mod usage;
 mod claude_auth;
+mod claude_accounts;
+mod taskbar;
+mod taskbar_activity;
+mod taskbar_model;
+#[cfg(windows)]
+mod taskbar_native;
+#[cfg(windows)]
+mod taskbar_render;
 mod codex;
 mod reset_watch;
 mod reset_alert;
 mod cursor;
+mod deepseek_harness;
 mod grok;
 mod copilot;
 mod antigravity;
 mod glm;
 mod opencode;
+mod commandcode;
+mod qoder;
 mod agy_cli;
 mod glyphs;
 mod trayicon;
@@ -34,6 +45,8 @@ mod watcher;
 mod settings_window;
 mod topmost;
 mod updater;
+#[cfg(target_os = "linux")]
+mod linux_pointer;
 
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
@@ -66,8 +79,13 @@ pub struct AppState {
     pub antigravity: Mutex<usage::UsageSnapshot>,
     /// GLM Coding Plan snapshot, read from the existing Z.AI tool credentials.
     pub glm: Mutex<usage::UsageSnapshot>,
+    /// DeepSeek Harness snapshot, derived from ~/.dsh session transcripts.
+    pub deepseek: Mutex<usage::UsageSnapshot>,
     /// OpenCode Go plan snapshot, read with OpenCode's own sign-in (auth.json or opencode.db).
     pub opencode: Mutex<usage::UsageSnapshot>,
+    pub commandcode: Mutex<usage::UsageSnapshot>,
+    /// Qoder plan quota snapshot, read through the official Agent SDK sidecar (qodercli sign-in).
+    pub qoder: Mutex<usage::UsageSnapshot>,
     /// Provider glyph cache, collected at launch and again on a tray refresh
     pub glyphs: Mutex<std::collections::HashMap<String, glyphs::Glyph>>,
     /// Working state of the non-Claude providers (Cursor reports it; Codex and Antigravity are inferred from recent writes)
@@ -585,9 +603,8 @@ fn get_claude_auth() -> claude_auth::AuthState { claude_auth::state() }
 pub(crate) fn refresh_provider(app: &AppHandle, provider: &str) -> bool {
     match provider {
         "claude" => {
-            if app.state::<AppState>().usage.lock().unwrap().backoff_until > now_ms() {
-                return false;
-            }
+            // Each profile enforces its own retry deadline. One throttled account
+            // must not block a manual refresh of every other account.
             usage::request_refresh();
         }
         "codex" => codex::request_refresh(),
@@ -596,7 +613,10 @@ pub(crate) fn refresh_provider(app: &AppHandle, provider: &str) -> bool {
         "copilot" => copilot::request_refresh(),
         "gemini" => antigravity::request_refresh(),
         "glm" => glm::request_refresh(),
+        "deepseek" => deepseek_harness::request_refresh(),
         "opencode" => opencode::request_refresh(),
+        "commandcode" => commandcode::request_refresh(),
+        "qoder" => qoder::request_refresh(),
         _ => return false,
     }
     true
@@ -622,6 +642,11 @@ fn get_antigravity(state: tauri::State<AppState>) -> usage::UsageSnapshot {
 }
 
 #[tauri::command]
+fn get_deepseek(state: tauri::State<AppState>) -> usage::UsageSnapshot {
+    state.deepseek.lock().unwrap().clone()
+}
+
+#[tauri::command]
 fn get_glm(state: tauri::State<AppState>) -> usage::UsageSnapshot {
     state.glm.lock().unwrap().clone()
 }
@@ -629,6 +654,16 @@ fn get_glm(state: tauri::State<AppState>) -> usage::UsageSnapshot {
 #[tauri::command]
 fn get_opencode(state: tauri::State<AppState>) -> usage::UsageSnapshot {
     state.opencode.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn get_commandcode(state: tauri::State<AppState>) -> usage::UsageSnapshot {
+    state.commandcode.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn get_qoder(state: tauri::State<AppState>) -> usage::UsageSnapshot {
+    state.qoder.lock().unwrap().clone()
 }
 
 #[tauri::command]
@@ -697,6 +732,10 @@ pub(crate) fn provider_page(provider: &str) -> Option<(&'static str, &'static st
         "gemini" => ("https://antigravity.google", "antigravity.google"),
         "glm" => ("https://z.ai/manage-apikey/apikey-list", "z.ai"),
         "opencode" => ("https://opencode.ai", "opencode.ai"),
+        "commandcode" => ("https://commandcode.ai", "commandcode.ai"),
+        "deepseek" => ("https://platform.deepseek.com/usage", "platform.deepseek.com"),
+        // The account page the SDK README documents (usage/plan and token minting live here)
+        "qoder" => ("https://qoder.com/account/integrations", "qoder.com"),
         _ => return None,
     })
 }
@@ -737,7 +776,11 @@ static HOT: Mutex<Vec<[f64; 4]>> = Mutex::new(Vec::new());
 static EXPANDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[tauri::command]
-fn set_hot(rects: Vec<[f64; 4]>, expanded: bool, probe: Option<[f64; 4]>) {
+fn set_hot(app: AppHandle, rects: Vec<[f64; 4]>, expanded: bool, probe: Option<[f64; 4]>) {
+    #[cfg(target_os = "linux")]
+    linux_pointer::set_hot(&app, rects.clone());
+    #[cfg(not(target_os = "linux"))]
+    let _ = app;
     *HOT.lock().unwrap() = rects;
     backdrop::set_probe(probe);
     EXPANDED.store(expanded, std::sync::atomic::Ordering::Relaxed);
@@ -751,6 +794,7 @@ fn set_hot(rects: Vec<[f64; 4]>, expanded: bool, probe: Option<[f64; 4]>) {
 /// never get the bit. `WS_EX_LAYERED` is what makes the window answer as one surface, so the helper
 /// that sets both is the only route. Clearing it again is safe — the notch is not otherwise layered
 /// (its transparency is DWM composition), so the window returns to the styles it had.
+#[cfg(not(target_os = "linux"))]
 fn set_click_through(app: &AppHandle, on: bool) {
     let Some(w) = app.get_webview_window("notch") else { return };
     let _ = w.set_ignore_cursor_events(on);
@@ -848,10 +892,12 @@ fn report_dpr(app: AppHandle, dpr: f64, w: f64, h: f64, settled: Option<bool>) {
 /// Slack around every hot rectangle: this is sampled on a timer, so a cursor arriving at the pill
 /// has to count as arrived slightly early, or a quick click lands between two polls while the
 /// window is still click-through and goes to whatever is behind it.
+#[cfg(any(test, not(target_os = "linux")))]
 const HOT_PAD: f64 = 10.0;
 
 /// Is the cursor on something the window is there for? `window` is the outer size in physical
 /// pixels, or None when it could not be read.
+#[cfg(any(test, not(target_os = "linux")))]
 fn cursor_in_hot(rects: &[[f64; 4]], lx: f64, ly: f64, window: Option<(f64, f64)>) -> bool {
     if rects.is_empty() {
         return false;
@@ -883,9 +929,11 @@ fn cursor_in_hot(rects: &[[f64; 4]], lx: f64, ly: f64, window: Option<(f64, f64)
 
 /// Was 150 ms, when this only decided whether the card stayed up. It now also gates whether a click
 /// reaches the notch, and at 150 ms a click arriving in the wrong sample went to the window behind.
+#[cfg(not(target_os = "linux"))]
 const WATCHDOG_MS: u64 = 50;
 /// Kept at the original 300 ms rather than falling out of the faster poll, which would make the
 /// card twitchy.
+#[cfg(not(target_os = "linux"))]
 const LEAVE_MS: u64 = 300;
 
 /// WebView2's mouseleave is unreliable inside a NOACTIVATE transparent window — a cursor that
@@ -899,6 +947,7 @@ const LEAVE_MS: u64 = 300;
 /// ordering is load-bearing: the window ignores the cursor while it is click-through, so the page
 /// gets no mousemove out there and cannot see the pointer arriving. This loop does, and hands the
 /// window its input back in time for the page to open the card.
+#[cfg(not(target_os = "linux"))]
 fn start_pointer_watchdog(app: AppHandle) {
     std::thread::spawn(move || {
         let need = (LEAVE_MS / WATCHDOG_MS).max(1) as u8;
@@ -1258,6 +1307,11 @@ fn ring_window<'a>(
         "glm" => by_id("session"),
         // The Mac sets headlineID "rolling", weeklyID "weekly".
         "opencode" => by_id("rolling"),
+        "commandcode" => by_id("monthly"),
+        // The Harness publishes no limit: the headline is today's derived budget ring.
+        "deepseek" => by_id("today"),
+        // getUsageInfo meters one plan window; the addon/org buckets are card-only rows.
+        "qoder" => by_id("quota"),
         _ => antigravity_lane(windows, antigravity_limit, antigravity_model),
     }
 }
@@ -1315,7 +1369,10 @@ pub(crate) fn snapshot_of(app: &AppHandle, id: &str) -> usage::UsageSnapshot {
         "copilot" => st.copilot.lock().unwrap().clone(),
         "gemini" => st.antigravity.lock().unwrap().clone(),
         "glm" => st.glm.lock().unwrap().clone(),
+        "deepseek" => st.deepseek.lock().unwrap().clone(),
         "opencode" => st.opencode.lock().unwrap().clone(),
+        "commandcode" => st.commandcode.lock().unwrap().clone(),
+        "qoder" => st.qoder.lock().unwrap().clone(),
         _ => st.usage.lock().unwrap().clone(),
     }
 }
@@ -1694,6 +1751,25 @@ fn set_notch_shows_remaining(app: AppHandle, on: bool) -> bool {
     on
 }
 
+#[tauri::command]
+fn get_show_usage_pace(app: AppHandle) -> bool {
+    let st = app.state::<AppState>();
+    let c = st.cfg.lock().unwrap();
+    c.show_usage_pace
+}
+
+#[tauri::command]
+fn set_show_usage_pace(app: AppHandle, on: bool) -> bool {
+    {
+        let st = app.state::<AppState>();
+        let mut c = st.cfg.lock().unwrap();
+        c.show_usage_pace = on;
+        config::save(&c);
+    }
+    let _ = app.emit("show_usage_pace", on);
+    on
+}
+
 /// One attached monitor, as Settings lists it.
 #[derive(serde::Serialize)]
 pub struct MonitorInfo {
@@ -1762,12 +1838,15 @@ pub fn provider_label(id: &str) -> &'static str {
         "gemini" => "Antigravity",
         "glm" => "z.ai",
         "opencode" => "OpenCode",
+        "commandcode" => "Command Code",
+        "deepseek" => "DeepSeek Harness",
+        "qoder" => "Qoder",
         _ => "Claude",
     }
 }
 
 /// Every provider the tray menu can offer, in the order the notch shows them.
-pub const TRAY_PROVIDER_IDS: [&str; 8] = ["claude", "codex", "glm", "opencode", "cursor", "grok", "copilot", "gemini"];
+pub const TRAY_PROVIDER_IDS: [&str; 11] = ["claude", "codex", "glm", "opencode", "commandcode", "cursor", "grok", "copilot", "gemini", "deepseek", "qoder"];
 
 /// Keeps the tray menu current. macOS rebuilds its menu as it opens; Tauri has no such hook, so it
 /// is rebuilt whenever a reading changes, and once a minute besides — otherwise "Resets in 12 min"
@@ -1958,7 +2037,10 @@ fn main() {
             copilot: Mutex::new(copilot::load_persisted()),
             antigravity: Mutex::new(antigravity::load_persisted()),
             glm: Mutex::new(glm::load_persisted()),
+            deepseek: Mutex::new(deepseek_harness::load_persisted()),
             opencode: Mutex::new(opencode::load_persisted()),
+            commandcode: Mutex::new(commandcode::load_persisted()),
+            qoder: Mutex::new(qoder::load_persisted()),
             glyphs: Mutex::new(Default::default()),
             activity: Mutex::new(Vec::new()),
         })
@@ -1967,6 +2049,20 @@ fn main() {
             get_usage,
             claude_sign_in,
             get_claude_auth,
+            claude_accounts::get_claude_accounts,
+            claude_accounts::add_claude_account,
+            claude_accounts::update_claude_account,
+            claude_accounts::connect_claude_account,
+            taskbar::get_taskbar_options,
+            taskbar::set_taskbar_options,
+            taskbar::get_taskbar_items,
+            taskbar::open_taskbar_details,
+            taskbar::taskbar_ready,
+            taskbar::show_taskbar_hover,
+            taskbar::hide_taskbar_hover,
+            taskbar::hold_taskbar_hover,
+            taskbar::report_taskbar_hover_size,
+            taskbar_activity::refresh_taskbar_item,
             updater::get_update_state,
             updater::check_for_update,
             updater::install_update,
@@ -1983,7 +2079,10 @@ fn main() {
             get_copilot,
             get_antigravity,
             get_glm,
+            get_deepseek,
             get_opencode,
+            get_commandcode,
+            get_qoder,
             get_glyphs,
             get_activity,
             open_data_dir,
@@ -2045,6 +2144,8 @@ fn main() {
             get_full_screen,
             get_notch_shows_remaining,
             set_notch_shows_remaining,
+            get_show_usage_pace,
+            set_show_usage_pace,
             settings_window::get_system_look,
             settings_window::quit_app,
             settings_window::settings_ready,
@@ -2057,6 +2158,8 @@ fn main() {
             // after paints the wrong one for a frame, which is a black flash under a light choice
             apply_theme(&handle);
             if let Some(w) = handle.get_webview_window("notch") {
+                #[cfg(target_os = "linux")]
+                linux_pointer::install(&w)?;
                 let _ = w.show();
             }
             tray::setup(&handle)?;
@@ -2074,17 +2177,22 @@ fn main() {
             copilot::start(handle.clone());
             antigravity::start(handle.clone());
             glm::start(handle.clone());
+    deepseek_harness::start(handle.clone());
             opencode::start(handle.clone());
+            commandcode::start(handle.clone());
+            qoder::start(handle.clone());
             activity::start(handle.clone());
             reset_watch::start(handle.clone());
             // Collecting glyphs may read icon resources out of a few executables; do it off the main thread and push when done
             let gh = handle.clone();
             std::thread::spawn(move || reload_glyphs(&gh));
+            #[cfg(not(target_os = "linux"))]
             start_pointer_watchdog(handle.clone());
             backdrop::start(handle.clone());
             start_work_area_watch(handle.clone());
             fullscreen::start(handle.clone());
             topmost::start_watchdog(handle.clone());
+            taskbar::start(&handle);
             // Seen-clears-it scan
             let acker = handle.clone();
             std::thread::spawn(move || {
@@ -2414,6 +2522,14 @@ mod tests {
     #[test]
     fn claude_means_the_session_even_when_the_week_is_fuller() {
         assert_eq!(pick("claude", &[win("session", 0.10), win("weekly_all", 0.60)]), Some("session"));
+    }
+
+    /// getUsageInfo's plan bucket is the headline; an add-on row never replaces a missing quota
+    #[test]
+    fn qoder_means_the_plan_window() {
+        assert_eq!(pick("qoder", &[win("quota", 0.4), win("addon", 0.9)]), Some("quota"));
+        assert_eq!(pick("qoder", &[win("addon", 0.9)]), None);
+        assert_eq!(pick("qoder", &[]), None);
     }
 
     #[test]
