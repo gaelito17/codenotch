@@ -37,11 +37,19 @@ final class CursorGeometryTests: XCTestCase {
     }
 
     private func originalPill(_ m: NotchViewModel, _ p: NotchPlacement) -> CGRect {
-        let joined = m.mergesWithCutout
-        let length = joined ? m.drawnAlongExtent : m.wakeLength
-        let lead = joined ? (m.wings.first?.lead ?? m.slack)
-            : m.restingAlongLead + (m.restingLength * m.sizeScale - m.wakeLength) / 2
-        return p.rect(along: lead, across: 0, length: length, depth: m.wakeDepth)
+        // Joined, the hole and whatever is drawn either side of it — folded,
+        // nothing is, and the hole is the whole target.
+        if m.mergesWithCutout, let cutout = m.cutout {
+            let middle = (m.cutoutSpan(cellCount: m.snapshots.count) + 2 * m.slack) / 2
+            var lead = middle - cutout.width / 2, end = middle + cutout.width / 2
+            for wing in m.wings where wing.length > 0 {
+                lead = min(lead, wing.lead)
+                end = max(end, wing.lead + wing.length)
+            }
+            return p.rect(along: lead, across: 0, length: end - lead, depth: m.wakeDepth)
+        }
+        let lead = m.restingAlongLead + (m.restingLength * m.sizeScale - m.wakeLength) / 2
+        return p.rect(along: lead, across: 0, length: m.wakeLength, depth: m.wakeDepth)
     }
 
     private func originalHandle(_ m: NotchViewModel, _ p: NotchPlacement, grip: Bool) -> CGRect {
@@ -113,6 +121,18 @@ final class CursorGeometryTests: XCTestCase {
         }
     }
 
+    func testRenderedSecondCellWinsWhenTheLayoutAndHitBandsDisagree() {
+        let m = model(edge: .top)
+        let g = geometry(m)
+        let first = g.placement.point(along: m.ringAlong(index: 0, in: m.cellWing), across: 12)
+        XCTAssertEqual(g.cellIndex(at: first), 0)
+        m.renderedCellFrames[m.snapshots[1].id] =
+            CGRect(x: first.x - 5, y: first.y - 5, width: 10, height: 10)
+        XCTAssertEqual(g.cellIndex(at: first), 1)
+        XCTAssertNil(g.cellIndex(at: CGPoint(x: -1000, y: -1000)))
+        XCTAssertEqual(g.cellIndex(at: first), 1)
+    }
+
     func testGripCanBeRevealedAndHiddenWithinTheSameEvaluation() {
         let m = model()
         let g = geometry(m)
@@ -174,7 +194,7 @@ final class CursorGeometryTests: XCTestCase {
         defer { controller.stop() }
         let frame = try XCTUnwrap(controller.panelFrameForTesting)
         let before = geometry(controller.model, size: frame.size)
-        let wake = before.pillRect
+        let wake = before.restingRect
         var looks = 0
         controller.onLook = {
             looks += 1
@@ -210,6 +230,76 @@ final class CursorGeometryTests: XCTestCase {
         XCTAssertEqual(looks, 1)
         XCTAssertEqual(m.hoveredIndex, 0)
         try assertPublishedLiveRectIsCurrent(controller)
+    }
+
+    // Nothing surrounds the folded pill: it opens when the pointer touches it,
+    // so passing by on the way to a button near the edge never opens it.
+    private func foldedController() throws -> (NotchWindowController, CursorGeometry) {
+        let controller = NotchWindowController()
+        controller.model.snapshots = model().snapshots
+        controller.foldsForFullScreen = false
+        controller.show()
+        let frame = try XCTUnwrap(controller.panelFrameForTesting)
+        XCTAssertFalse(controller.model.isExpanded)
+        return (controller, geometry(controller.model, size: frame.size))
+    }
+
+    func testFoldedPillOpensOnContact() throws {
+        let (controller, g) = try foldedController()
+        defer { controller.stop() }
+        controller.cursorMoved(at: CGPoint(x: g.restingRect.midX, y: g.restingRect.midY))
+        XCTAssertTrue(controller.model.isExpanded)
+    }
+
+    /// This fork wakes the notch only when the pointer touches the pill, so
+    /// there is no band around it to rest in: a point just past the pill's far
+    /// side neither opens the notch nor takes a click.
+    func testNothingAroundTheFoldedPillWakesItOrTakesClicks() throws {
+        let (controller, g) = try foldedController()
+        defer { controller.stop() }
+        let m = controller.model
+        let along = g.placement.along(of: CGPoint(x: g.restingRect.midX, y: g.restingRect.midY))
+        let pillDepth = m.restingDepth * m.sizeScale + m.edgeGap
+        let beside = g.placement.point(along: along, across: pillDepth + 12)
+        controller.cursorMoved(at: beside)
+        XCTAssertFalse(controller.model.isExpanded, "the pointer beside the pill opened the notch")
+        XCTAssertEqual(g.restingRect, g.pillRect, "the wake region grew past the pill")
+        XCTAssertFalse(g.clickRect(gripRevealed: false).contains(beside))
+    }
+
+    // The pill that opens at once and takes clicks is the pill as drawn, on
+    // every edge, floating or not; joined to the hardware notch there is no
+    // band, so the whole notch is both.
+    func testRestingRectIsTheDrawnPillOnEveryEdgeAndStyle() {
+        for edge in NotchEdge.allCases {
+            for style in [NotchSurfaceStyle.solid, .dock] {
+                for joined in [false, true] where !joined || edge == .top {
+                    let m = model(edge: edge, expanded: false)
+                    m.surfaceStyle = style
+                    m.cutout = joined ? CutoutProximity(depth: 38, overlap: 12, width: 220) : nil
+                    let g = geometry(m)
+                    if m.mergesWithCutout {
+                        XCTAssertEqual(g.restingRect, g.pillRect, "\(edge) \(style)")
+                    } else {
+                        assertSameRect(g.restingRect, g.notchRect, "\(edge) \(style)")
+                        XCTAssertTrue(g.pillRect.contains(g.restingRect), "\(edge) \(style)")
+                    }
+                    XCTAssertEqual(g.clickRect(gripRevealed: false), g.restingRect)
+                    m.isExpanded = true
+                    let open = geometry(m)
+                    XCTAssertEqual(open.clickRect(gripRevealed: true), open.liveRect(gripRevealed: true))
+                }
+            }
+        }
+    }
+
+    // The two are built from the same lengths along different paths, so they
+    // can differ in the last bits of a CGFloat.
+    private func assertSameRect(_ a: CGRect, _ b: CGRect, _ message: String,
+                                file: StaticString = #filePath, line: UInt = #line) {
+        for (x, y) in [(a.minX, b.minX), (a.minY, b.minY), (a.width, b.width), (a.height, b.height)] {
+            XCTAssertEqual(x, y, accuracy: 0.001, message, file: file, line: line)
+        }
     }
 
     private func assertPublishedLiveRectIsCurrent(_ controller: NotchWindowController,
